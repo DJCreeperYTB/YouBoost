@@ -1,0 +1,10 @@
+{
+  "name": "youboost",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Plateforme statique de découverte pour petits créateurs YouTube",
+  "scripts": {
+    "start": "node scripts/serve.js",
+    "check": "node --check app.js && node --check scripts/serve.js"
+  }
+}

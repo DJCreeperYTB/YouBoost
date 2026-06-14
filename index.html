@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="YouBoost met en avant les vidéos YouTube des petits créateurs."
+    />
+    <meta name="theme-color" content="#ff3b3f" />
+    <meta
+      name="youboost-api-base"
+      content="https://tyeyjsflihxygkospkjk.supabase.co/functions/v1/youboost-api"
+    />
+    <title>YouBoost - Découvrez les créateurs de demain</title>
+    <link rel="icon" href="pictures/icone-youboost-web.png" type="image/png" />
+    <link rel="preconnect" href="https://i.ytimg.com" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <svg class="svg-sprite" aria-hidden="true">
+      <symbol id="icon-menu" viewBox="0 0 24 24">
+        <path d="M4 6h16M4 12h16M4 18h16" />
+      </symbol>
+      <symbol id="icon-home" viewBox="0 0 24 24">
+        <path d="m3 11 9-8 9 8v9a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z" />
+      </symbol>
+      <symbol id="icon-sparkles" viewBox="0 0 24 24">
+        <path d="m12 3 1.2 3.8L17 8l-3.8 1.2L12 13l-1.2-3.8L7 8l3.8-1.2ZM19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8ZM5 14l.8 2.2L8 17l-2.2.8L5 20l-.8-2.2L2 17l2.2-.8Z" />
+      </symbol>
+      <symbol id="icon-clock" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 2" />
+      </symbol>
+      <symbol id="icon-heart" viewBox="0 0 24 24">
+        <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8l1.1 1.1L12 21l7.8-7.5 1.1-1.1a5.5 5.5 0 0 0-.1-7.8Z" />
+      </symbol>
+      <symbol id="icon-compass" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <path d="m15.5 8.5-2 5-5 2 2-5Z" />
+      </symbol>
+      <symbol id="icon-search" viewBox="0 0 24 24">
+        <circle cx="11" cy="11" r="7" />
+        <path d="m20 20-4-4" />
+      </symbol>
+      <symbol id="icon-plus" viewBox="0 0 24 24">
+        <path d="M12 5v14M5 12h14" />
+      </symbol>
+      <symbol id="icon-play" viewBox="0 0 24 24">
+        <path d="m9 7 8 5-8 5Z" />
+      </symbol>
+      <symbol id="icon-x" viewBox="0 0 24 24">
+        <path d="m6 6 12 12M18 6 6 18" />
+      </symbol>
+      <symbol id="icon-external" viewBox="0 0 24 24">
+        <path d="M14 5h5v5M19 5l-8 8" />
+        <path d="M18 13v5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
+      </symbol>
+      <symbol id="icon-sliders" viewBox="0 0 24 24">
+        <path d="M4 7h10M18 7h2M4 17h2M10 17h10" />
+        <circle cx="16" cy="7" r="2" />
+        <circle cx="8" cy="17" r="2" />
+      </symbol>
+      <symbol id="icon-user" viewBox="0 0 24 24">
+        <circle cx="12" cy="8" r="4" />
+        <path d="M4 21a8 8 0 0 1 16 0" />
+      </symbol>
+      <symbol id="icon-chevron" viewBox="0 0 24 24">
+        <path d="m9 18 6-6-6-6" />
+      </symbol>
+    </svg>
+
+    <header class="topbar">
+      <div class="topbar__brand">
+        <button class="icon-button menu-button" id="menuButton" type="button" aria-label="Ouvrir le menu">
+          <svg><use href="#icon-menu"></use></svg>
+        </button>
+        <a class="brand" href="#" aria-label="Accueil YouBoost">
+          <img src="pictures/en-t%C3%AAte%20mail%20YouBoost.png" alt="YouBoost" />
+        </a>
+      </div>
+
+      <form class="search" id="searchForm" role="search">
+        <svg aria-hidden="true"><use href="#icon-search"></use></svg>
+        <input
+          id="searchInput"
+          type="search"
+          placeholder="Rechercher une vidéo, un créateur..."
+          autocomplete="off"
+          aria-label="Rechercher des vidéos ou des créateurs"
+        />
+        <kbd>Ctrl K</kbd>
+        <button class="search__clear" id="clearSearch" type="button" aria-label="Effacer la recherche">
+          <svg><use href="#icon-x"></use></svg>
+        </button>
+      </form>
+
+      <div class="topbar__actions">
+        <button class="button button--ghost upgrade-button" id="upgradeButton" type="button">
+          Mettre à niveau
+        </button>
+        <button class="button button--primary add-video-button" id="openSubmit" type="button">
+          <svg><use href="#icon-plus"></use></svg>
+          <span>Ajouter une vidéo</span>
+        </button>
+        <button class="avatar-button" id="profileButton" type="button" aria-label="Compte créateur">
+          <img id="profileAvatar" alt="" hidden />
+          <svg id="profileAvatarFallback"><use href="#icon-user"></use></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="app-layout">
+      <aside class="sidebar" id="sidebar">
+        <nav aria-label="Navigation principale">
+          <button class="nav-item is-active" data-view="recommended" type="button">
+            <svg><use href="#icon-home"></use></svg>
+            <span>Pour vous</span>
+          </button>
+          <button class="nav-item" data-view="new" type="button">
+            <svg><use href="#icon-clock"></use></svg>
+            <span>Nouveautés</span>
+          </button>
+          <button class="nav-item" data-view="favorites" type="button">
+            <svg><use href="#icon-heart"></use></svg>
+            <span>Favoris</span>
+          </button>
+          <button class="nav-item" data-view="explore" type="button">
+            <svg><use href="#icon-compass"></use></svg>
+            <span>Explorer</span>
+          </button>
+        </nav>
+
+        <div class="sidebar__separator"></div>
+
+        <section class="sidebar__section">
+          <p class="sidebar__label">Vos univers</p>
+          <div id="sidebarCategories"></div>
+        </section>
+
+        <div class="sidebar__tip">
+          <div class="sidebar__tip-icon">
+            <svg><use href="#icon-sparkles"></use></svg>
+          </div>
+          <strong>Votre fil s'améliore</strong>
+          <p>Regardez et ajoutez des vidéos aux favoris pour personnaliser vos recommandations.</p>
+          <button id="resetProfile" type="button">Réinitialiser mon profil</button>
+        </div>
+
+        <p class="sidebar__footer">YouBoost <span id="currentYear"></span><br />Propulsé par les petits créateurs.</p>
+      </aside>
+
+      <main class="content">
+        <section class="hero">
+          <div class="hero__content">
+            <span class="eyebrow"><span></span> La relève est déjà là</span>
+            <h1>Découvrez votre prochaine<br /><em>pépite.</em></h1>
+            <p>
+              Des vidéos choisies pour vous, créées par des talents qui méritent d'être vus.
+            </p>
+            <button class="button button--dark" id="discoverButton" type="button">
+              Lancer la découverte
+              <svg><use href="#icon-chevron"></use></svg>
+            </button>
+          </div>
+          <div class="hero__art" aria-hidden="true">
+            <div class="hero__orb hero__orb--one"></div>
+            <div class="hero__orb hero__orb--two"></div>
+            <div class="hero__logo">
+              <img src="pictures/icone-youboost-web.png" alt="" />
+            </div>
+            <div class="floating-card floating-card--views">
+              <span class="floating-card__icon">↗</span>
+              <div><strong>+ de visibilité</strong><small>pour chaque créateur</small></div>
+            </div>
+            <div class="floating-card floating-card--people">
+              <span class="floating-avatars"><i>JD</i><i>MK</i><i>AL</i></span>
+              <div><strong>Communauté</strong><small>curieuse et engagée</small></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="feed" aria-labelledby="feedTitle">
+          <div class="feed__header">
+            <div>
+              <p class="section-kicker" id="sectionKicker">Sélection personnalisée</p>
+              <h2 id="feedTitle">Pour vous</h2>
+            </div>
+            <div class="sort-switch" aria-label="Trier les vidéos">
+              <button class="is-active" data-sort="recommended" type="button">
+                <svg><use href="#icon-sparkles"></use></svg>
+                Recommandé
+              </button>
+              <button data-sort="new" type="button">
+                <svg><use href="#icon-clock"></use></svg>
+                Nouveau
+              </button>
+            </div>
+          </div>
+
+          <div class="category-row" id="categoryRow" aria-label="Filtrer par catégorie"></div>
+
+          <div class="results-summary" id="resultsSummary" aria-live="polite"></div>
+
+          <div class="video-grid" id="videoGrid" aria-live="polite"></div>
+
+          <div class="empty-state" id="emptyState" hidden>
+            <div class="empty-state__icon">
+              <svg><use href="#icon-search"></use></svg>
+            </div>
+            <h3>Aucune pépite trouvée</h3>
+            <p>Essayez un autre mot-clé ou retirez le filtre actif.</p>
+            <button class="button button--dark" id="resetFilters" type="button">Voir toutes les vidéos</button>
+          </div>
+        </section>
+
+        <section class="mission">
+          <div>
+            <p class="section-kicker">Notre mission</p>
+            <h2>Moins de buzz.<br />Plus de talent.</h2>
+          </div>
+          <p>
+            YouBoost privilégie la découverte, la fraîcheur et vos goûts. Le nombre d'abonnés
+            n'achète pas une place dans votre fil.
+          </p>
+        </section>
+      </main>
+    </div>
+
+    <nav class="mobile-nav" aria-label="Navigation mobile">
+      <button class="is-active" data-view="recommended" type="button">
+        <svg><use href="#icon-home"></use></svg><span>Pour vous</span>
+      </button>
+      <button data-view="new" type="button">
+        <svg><use href="#icon-clock"></use></svg><span>Nouveau</span>
+      </button>
+      <button class="mobile-add" id="mobileSubmit" type="button" aria-label="Ajouter une vidéo">
+        <svg><use href="#icon-plus"></use></svg>
+      </button>
+      <button data-view="favorites" type="button">
+        <svg><use href="#icon-heart"></use></svg><span>Favoris</span>
+      </button>
+      <button data-view="explore" type="button">
+        <svg><use href="#icon-compass"></use></svg><span>Explorer</span>
+      </button>
+    </nav>
+
+    <dialog class="video-dialog" id="videoDialog">
+      <div class="dialog-panel">
+        <button class="dialog-close icon-button" data-close-dialog type="button" aria-label="Fermer">
+          <svg><use href="#icon-x"></use></svg>
+        </button>
+        <div class="player-wrap">
+          <iframe
+            id="videoPlayer"
+            title="Lecteur YouTube"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowfullscreen
+          ></iframe>
+        </div>
+        <div class="video-dialog__body">
+          <span class="video-dialog__category" id="dialogCategory"></span>
+          <h2 id="dialogTitle"></h2>
+          <div class="video-dialog__creator">
+            <div class="creator-avatar" id="dialogAvatar"></div>
+            <div><strong id="dialogCreator"></strong><span id="dialogSubscribers"></span></div>
+          </div>
+          <p id="dialogDescription"></p>
+          <div class="video-dialog__actions">
+            <button class="button button--soft" id="dialogFavorite" type="button">
+              <svg><use href="#icon-heart"></use></svg>
+              Ajouter aux favoris
+            </button>
+            <a class="button button--dark" id="dialogYoutubeLink" target="_blank" rel="noopener noreferrer">
+              Voir sur YouTube
+              <svg><use href="#icon-external"></use></svg>
+            </a>
+          </div>
+          <button class="not-interested" id="notInterested" type="button">
+            Cette vidéo ne m'intéresse pas
+          </button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="submit-dialog" id="submitDialog">
+      <form class="dialog-panel submit-form" id="submitForm">
+        <button class="dialog-close icon-button" data-close-dialog type="button" aria-label="Fermer">
+          <svg><use href="#icon-x"></use></svg>
+        </button>
+        <span class="eyebrow"><span></span> Espace créateur</span>
+        <h2>Proposer une vidéo</h2>
+        <p class="submit-form__warning" id="submitCreatorSummary"></p>
+        <label>
+          Lien YouTube
+          <input name="url" type="url" placeholder="https://www.youtube.com/watch?v=..." required />
+          <small>La vidéo doit appartenir à la chaîne liée à votre code.</small>
+        </label>
+        <div class="form-row">
+          <label>
+            Catégorie
+            <select name="category" id="submitCategory" required></select>
+          </label>
+          <label>
+            Mots-clés
+            <input name="tags" type="text" maxlength="120" placeholder="Ex. musique, clip, électro" />
+          </label>
+        </div>
+        <label>
+          Message pour l’équipe YouBoost
+          <textarea
+            name="note"
+            rows="3"
+            maxlength="300"
+            placeholder="Présentez rapidement votre vidéo."
+          ></textarea>
+        </label>
+        <p class="submit-form__rules">
+          Une seule proposition par jour est autorisée. La vidéo sera publiée sur YouBoost
+          uniquement après validation par l’administrateur.
+        </p>
+        <p class="submit-form__status" id="submitStatus" role="status" aria-live="polite"></p>
+        <div class="submit-form__footer">
+          <button class="button button--ghost" data-close-dialog type="button">Annuler</button>
+          <button class="button button--primary" id="submitVideoButton" type="submit">
+            <svg><use href="#icon-plus"></use></svg>
+            Envoyer la demande
+          </button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="submit-dialog account-dialog" id="accountDialog">
+      <div class="dialog-panel submit-form">
+        <button class="dialog-close icon-button" data-close-dialog type="button" aria-label="Fermer">
+          <svg><use href="#icon-x"></use></svg>
+        </button>
+
+        <div id="accountLoggedOut">
+          <span class="eyebrow"><span></span> Compte créateur</span>
+          <h2>Se connecter à YouBoost</h2>
+          <p class="submit-form__intro">
+            Entrez le code personnel associé à votre chaîne YouTube.
+          </p>
+          <form id="creatorLoginForm">
+            <label>
+              Code créateur
+              <input
+                name="code"
+                type="password"
+                placeholder="Votre code personnel"
+                minlength="6"
+                maxlength="32"
+                autocomplete="current-password"
+                required
+              />
+            </label>
+            <p class="submit-form__status" id="creatorLoginStatus" role="status"></p>
+            <button class="button button--primary account-dialog__submit" type="submit">
+              Se connecter
+            </button>
+          </form>
+          <a
+            class="creator-code-help"
+            href="https://forms.gle/au9UPPqFdBXKSxqi6"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Comment avoir un code créateur ?
+          </a>
+        </div>
+
+        <div id="accountLoggedIn" hidden>
+          <span class="eyebrow"><span></span> Compte créateur</span>
+          <h2 id="accountChannelTitle"></h2>
+          <p class="account-email" id="accountEmail"></p>
+          <div class="account-plan">
+            <span>Forfait actuel</span>
+            <strong id="accountPlanName">Gratuit</strong>
+            <small id="accountPlanDates"></small>
+          </div>
+          <div class="account-actions">
+            <button class="button button--primary" id="accountUpgradeButton" type="button">
+              Mettre à niveau
+            </button>
+            <button class="button button--ghost" id="creatorLogoutButton" type="button">
+              Se déconnecter
+            </button>
+          </div>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="submit-dialog plans-dialog" id="plansDialog">
+      <div class="dialog-panel submit-form">
+        <button class="dialog-close icon-button" data-close-dialog type="button" aria-label="Fermer">
+          <svg><use href="#icon-x"></use></svg>
+        </button>
+        <span class="eyebrow"><span></span> Visibilité créateur</span>
+        <h2>Choisissez votre forfait</h2>
+        <p class="submit-form__intro">
+          Les vidéos Pro reçoivent une priorité supplémentaire dans les recommandations YouBoost.
+        </p>
+        <div class="plan-grid">
+          <article class="plan-card">
+            <span class="plan-card__label">Actuel</span>
+            <h3>Gratuit</h3>
+            <strong>0 €<small>/mois</small></strong>
+            <p>Mise en avant naturelle selon la fraîcheur, les goûts et la découverte.</p>
+          </article>
+          <article class="plan-card plan-card--pro">
+            <span class="plan-card__label">Plus de visibilité</span>
+            <h3>Pro</h3>
+            <strong>10 €<small>/mois</small></strong>
+            <p>Priorité renforcée dans les recommandations pendant un mois.</p>
+            <button class="button button--primary" id="chooseProButton" type="button">
+              Choisir Pro
+            </button>
+          </article>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="submit-dialog payment-dialog" id="paymentDialog">
+      <div class="dialog-panel submit-form">
+        <button class="dialog-close icon-button" data-close-dialog type="button" aria-label="Fermer">
+          <svg><use href="#icon-x"></use></svg>
+        </button>
+        <span class="eyebrow"><span></span> Paiement Pro</span>
+        <h2>Avant de continuer</h2>
+        <div class="payment-warning">
+          <p>
+            Vous allez être redirigé vers
+            <strong>paypal.me/djcreeperytb</strong>.
+          </p>
+          <p>
+            Indiquez obligatoirement votre chaîne YouTube dans la description du virement afin que
+            l’abonnement puisse être attribué au bon compte.
+          </p>
+          <p><strong>Aucun remboursement ne pourra être effectué.</strong></p>
+        </div>
+        <div class="submit-form__footer">
+          <button class="button button--ghost" data-close-dialog type="button">Annuler</button>
+          <button class="button button--primary" id="continuePaypalButton" type="button">
+            Continuer vers PayPal
+          </button>
+        </div>
+      </div>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <template id="videoCardTemplate">
+      <article class="video-card">
+        <button class="video-card__media" type="button">
+          <img alt="" loading="lazy" />
+          <span class="video-card__shade"></span>
+          <span class="play-button"><svg><use href="#icon-play"></use></svg></span>
+          <span class="duration"></span>
+          <span class="new-badge">Nouveau</span>
+          <span class="pro-badge">PRO</span>
+        </button>
+        <div class="video-card__body">
+          <div class="creator-avatar"></div>
+          <div class="video-card__details">
+            <button class="video-card__title" type="button"></button>
+            <button class="creator-name" type="button"></button>
+            <p class="video-meta"></p>
+          </div>
+          <button class="favorite-button" type="button" aria-label="Ajouter aux favoris">
+            <svg><use href="#icon-heart"></use></svg>
+          </button>
+        </div>
+        <div class="video-card__tags"></div>
+      </article>
+    </template>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>
