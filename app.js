@@ -88,15 +88,8 @@ async function init() {
   document.querySelector("#currentYear").textContent = new Date().getFullYear();
   await restoreCreatorSession();
 
-  const [catalogVideos, publishedVideos] = await Promise.all([
-    loadCatalogVideos(),
-    loadPublishedVideos(),
-  ]);
-  const uniqueVideos = new Map();
-  [...catalogVideos, ...publishedVideos].forEach((video) => {
-    uniqueVideos.set(video.youtubeId || video.id, video);
-  });
-  state.videos = [...uniqueVideos.values()].map(normalizeVideo);
+  const publishedVideos = await loadPublishedVideos();
+  state.videos = publishedVideos.map(normalizeVideo);
   render();
 
   if (!state.videos.length) {
@@ -706,18 +699,6 @@ async function loadPublishedVideos() {
     if (!response.ok) throw new Error("Catalogue distant inaccessible");
     const result = await response.json();
     return Array.isArray(result.videos) ? result.videos : [];
-  } catch (error) {
-    console.warn(error);
-    return [];
-  }
-}
-
-async function loadCatalogVideos() {
-  try {
-    const response = await fetch("data/videos.json");
-    if (!response.ok) throw new Error("Catalogue statique inaccessible");
-    const videos = await response.json();
-    return Array.isArray(videos) ? videos : [];
   } catch (error) {
     console.warn(error);
     return [];

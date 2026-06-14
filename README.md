@@ -6,9 +6,9 @@ personnalisé.
 
 ## Fonctionnement sur GitHub Pages
 
-Le site est entièrement statique. GitHub Pages sert automatiquement `index.html` à l'ouverture du
-site, puis le navigateur charge `data/videos.json`. Aucun serveur local et aucune commande
-`npm start` ne sont nécessaires pour que YouBoost reste accessible en ligne.
+GitHub Pages sert automatiquement `index.html` à l'ouverture du site. Le catalogue contient
+uniquement les vidéos approuvées dans le panel administrateur et chargées depuis Supabase.
+Aucun serveur local et aucune commande `npm start` ne sont nécessaires.
 
 ## Recommandations
 
@@ -31,31 +31,10 @@ Les créateurs se connectent depuis l’icône de profil avec leur code personne
 
 ## Ajouter des vidéos au catalogue public
 
-Modifiez [`data/videos.json`](data/videos.json) en ajoutant une entrée :
-
-```json
-{
-  "id": "identifiant-unique",
-  "youtubeId": "ID_DE_LA_VIDEO",
-  "title": "Titre de la vidéo",
-  "creator": "Nom de la chaîne",
-  "creatorInitials": "NC",
-  "subscribers": 2400,
-  "category": "Tech",
-  "tags": ["web", "tutoriel"],
-  "description": "Description courte.",
-  "duration": "8:24",
-  "publishedAt": "2026-06-10T18:00:00Z",
-  "addedAt": "2026-06-14T10:00:00Z",
-  "views": 1200,
-  "accent": "#2563eb"
-}
-```
-
-Le formulaire créateur envoie désormais les propositions à une Edge Function Supabase. Aucun
+Le formulaire créateur envoie les propositions à une Edge Function Supabase. Une vidéo apparaît
+sur YouBoost uniquement après son acceptation dans le panel administrateur. Aucun
 serveur personnel n'a besoin de rester allumé. Le projet Supabase `tyeyjsflihxygkospkjk` est déjà
-relié dans `index.html`. Le catalogue statique continue de fonctionner lorsque l'API est
-indisponible.
+relié dans `index.html`.
 
 ## Déployer sur GitHub Pages
 
@@ -63,6 +42,3 @@ indisponible.
 2. Ouvrez `Settings > Pages`.
 3. Dans `Build and deployment`, choisissez `Deploy from a branch`.
 4. Sélectionnez la branche principale et le dossier `/ (root)`.
-
-Les fiches présentes par défaut sont des données de démonstration. Remplacez-les par les vrais
-créateurs sélectionnés avant une publication publique.
