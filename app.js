@@ -221,8 +221,6 @@ function getVisibleVideos() {
 
   if (state.view === "favorites") {
     videos = videos.filter((video) => state.profile.favorites.includes(video.id));
-  } else if (state.view === "recommended" && !normalizedQuery) {
-    videos = videos.filter((video) => !state.profile.favorites.includes(video.id));
   }
 
   if (state.category !== "Tout") {
@@ -266,7 +264,9 @@ function recommendationScore(video, favoriteSeeds) {
   const freshness = Math.max(0, 28 - freshnessDays) * 0.45;
   const smallCreatorBoost = Math.max(0, 10000 - video.subscribers) / 1500;
   const exploration = seededNumber(`${video.id}-${todayKey()}`) * 5;
-  const favoriteAffinity = favoriteSimilarityScore(video, favoriteSeeds);
+  const favoriteAffinity = state.profile.favorites.includes(video.id)
+    ? 0
+    : favoriteSimilarityScore(video, favoriteSeeds);
   const proBoost = video.isPro ? 3.5 : 0;
   const approvedBoost = video.isApproved ? 16 : 0;
   const repeatPenalty = watchedCount * 6;
