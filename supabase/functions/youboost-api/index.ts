@@ -1044,8 +1044,24 @@ async function sendGmailDecision(creator: any, submission: any) {
   const subject = accepted
     ? "Votre vidéo a été acceptée sur YouBoost"
     : "Décision concernant votre vidéo YouBoost";
+  const text = [
+    `Bonjour ${creator.channel_title || "créateur"},`,
+    "",
+    `Votre proposition « ${title} » a été ${decision}.`,
+    reason ? `Message de l'équipe : ${reason}` : "",
+    accepted ? "Elle est maintenant visible sur YouBoost." : "",
+    "",
+    "Vous recevez cet e-mail car vous avez proposé cette vidéo avec votre compte créateur YouBoost.",
+    "",
+    "L'équipe YouBoost",
+  ]
+    .filter(Boolean)
+    .join("\n");
   const html = `
-    <div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#101828">
+    <!doctype html>
+    <html lang="fr">
+    <body style="margin:0;padding:24px;background:#f5f6f8">
+    <div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#101828;background:white">
       <div style="padding:20px;background:#07142e;color:white;border-radius:14px 14px 0 0">
         <strong style="font-size:22px">YouBoost</strong>
       </div>
@@ -1056,10 +1072,15 @@ async function sendGmailDecision(creator: any, submission: any) {
         ${reason ? `<p><strong>Message de l'équipe :</strong> ${escapeHtml(reason)}</p>` : ""}
         ${accepted ? "<p>Elle est maintenant visible sur YouBoost.</p>" : ""}
         <p style="margin-top:28px;color:#667085">L'équipe YouBoost</p>
+        <p style="margin-top:24px;padding-top:16px;border-top:1px solid #e6e8ec;color:#98a2b3;font-size:12px;line-height:1.5">
+          Vous recevez cet e-mail car vous avez proposé cette vidéo avec votre compte créateur YouBoost.
+        </p>
       </div>
-    </div>`;
+    </div>
+    </body>
+    </html>`;
 
-  await sendGmailMessage(creator.email, subject, html);
+  await sendGmailMessage(creator.email, subject, text, html);
 }
 
 async function sendGmailCreatorWelcome(creator: any, code: string) {
@@ -1068,8 +1089,24 @@ async function sendGmailCreatorWelcome(creator: any, code: string) {
     "PUBLIC_SITE_URL",
     "https://djcreeperytb.github.io/YouBoost/",
   );
+  const text = [
+    `Bonjour ${creator.channel_title || "créateur"},`,
+    "",
+    "Votre compte créateur YouBoost vient d'être créé.",
+    `Votre code personnel est : ${code}`,
+    "",
+    "Gardez ce code privé. Il vous permet de vous connecter et de proposer vos vidéos.",
+    `Ouvrir YouBoost : ${siteUrl}`,
+    "",
+    "Vous recevez cet e-mail car un compte créateur YouBoost a été créé pour cette adresse.",
+    "",
+    "L'équipe YouBoost",
+  ].join("\n");
   const html = `
-    <div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#101828">
+    <!doctype html>
+    <html lang="fr">
+    <body style="margin:0;padding:24px;background:#f5f6f8">
+    <div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#101828;background:white">
       <div style="padding:20px;background:#07142e;color:white;border-radius:14px 14px 0 0">
         <strong style="font-size:22px">YouBoost</strong>
       </div>
@@ -1087,25 +1124,56 @@ async function sendGmailCreatorWelcome(creator: any, code: string) {
           </a>
         </p>
         <p style="margin-top:28px;color:#667085">L'équipe YouBoost</p>
+        <p style="margin-top:24px;padding-top:16px;border-top:1px solid #e6e8ec;color:#98a2b3;font-size:12px;line-height:1.5">
+          Vous recevez cet e-mail car un compte créateur YouBoost a été créé pour cette adresse.
+        </p>
       </div>
-    </div>`;
+    </div>
+    </body>
+    </html>`;
 
-  await sendGmailMessage(creator.email, subject, html);
+  await sendGmailMessage(creator.email, subject, text, html);
 }
 
-async function sendGmailMessage(to: string, subject: string, html: string) {
+async function sendGmailMessage(
+  to: string,
+  subject: string,
+  text: string,
+  html: string,
+) {
   ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN"].forEach(
     requireSecret,
   );
+  const sender = env("GMAIL_SENDER", "youboost.creators@gmail.com").trim();
+  if (!isEmailAddress(sender) || !isEmailAddress(to)) {
+    throw new Error("L'adresse e-mail d'envoi ou de destination est invalide.");
+  }
+  const senderDomain = sender.split("@")[1];
+  const boundary = `youboost-${crypto.randomUUID()}`;
   const mime = [
-    `From: YouBoost <${env("GMAIL_SENDER", "youboost.creators@gmail.com")}>`,
+    `From: YouBoost <${sender}>`,
     `To: ${to}`,
     `Subject: ${encodeMimeHeader(subject)}`,
+    `Date: ${new Date().toUTCString()}`,
+    `Message-ID: <${crypto.randomUUID()}@${senderDomain}>`,
+    `Reply-To: YouBoost <${sender}>`,
+    "Auto-Submitted: auto-generated",
+    "X-Auto-Response-Suppress: All",
     "MIME-Version: 1.0",
-    'Content-Type: text/html; charset="UTF-8"',
-    "Content-Transfer-Encoding: 8bit",
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
     "",
-    html,
+    `--${boundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    "Content-Transfer-Encoding: base64",
+    "",
+    encodeMimeBody(text),
+    `--${boundary}`,
+    'Content-Type: text/html; charset="UTF-8"',
+    "Content-Transfer-Encoding: base64",
+    "",
+    encodeMimeBody(html),
+    `--${boundary}--`,
+    "",
   ].join("\r\n");
 
   const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
@@ -1590,6 +1658,18 @@ function escapeHtml(value: unknown) {
 
 function encodeMimeHeader(value: string) {
   return `=?UTF-8?B?${base64(new TextEncoder().encode(value))}?=`;
+}
+
+function encodeMimeBody(value: string) {
+  return base64(new TextEncoder().encode(value)).match(/.{1,76}/g)?.join("\r\n") || "";
+}
+
+function isEmailAddress(value: string) {
+  return (
+    value.length <= 254 &&
+    !/[\r\n]/.test(value) &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+  );
 }
 
 async function hmacHex(value: string, secret: string) {
