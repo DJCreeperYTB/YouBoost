@@ -61,7 +61,8 @@ Deno.serve(async (request) => {
       throw new HttpError(403, "Origine non autorisée.");
     }
 
-    const route = apiRoute(new URL(request.url).pathname);
+    const requestUrl = new URL(request.url);
+    const route = apiRoute(requestUrl.pathname);
 
     if (request.method === "GET" && route === "/api/health") {
       return json(
@@ -78,6 +79,28 @@ Deno.serve(async (request) => {
 
     if (request.method === "GET" && route === "/api/videos") {
       return json(200, { videos: await publishedVideos() }, corsHeaders);
+    }
+
+    if (request.method === "POST" && route === "/api/analytics/session") {
+      requireAnalyticsOrigin(origin);
+      return json(202, await recordAnalyticsVisit(await readJson(request)), corsHeaders);
+    }
+
+    if (request.method === "POST" && route === "/api/analytics/heartbeat") {
+      requireAnalyticsOrigin(origin);
+      return json(200, await recordAnalyticsHeartbeat(await readJson(request)), corsHeaders);
+    }
+
+    if (request.method === "POST" && route === "/api/analytics/video-click") {
+      requireAnalyticsOrigin(origin);
+      const body = await readJson(request);
+      const visitorId = requireUuid(body.visitorId, "visiteur");
+      await enforceRateLimit(`analytics-click:${visitorId}`, 60, 60);
+      return json(
+        202,
+        await recordAnalyticsVideoClick({ ...body, visitorId }),
+        corsHeaders,
+      );
     }
 
     if (request.method === "POST" && route === "/api/creator/login") {
@@ -111,6 +134,9 @@ Deno.serve(async (request) => {
 
       if (request.method === "GET" && route === "/api/admin/dashboard") {
         return json(200, await dashboard(), corsHeaders);
+      }
+      if (request.method === "GET" && route === "/api/admin/analytics") {
+        return json(200, await analyticsReport(requestUrl.searchParams), corsHeaders);
       }
       if (request.method === "POST" && route === "/api/admin/creators") {
         return json(201, await createCreator(await readJson(request)), corsHeaders);
@@ -336,6 +362,99 @@ async function createSubmission(creatorId: string, body: Record<string, unknown>
     submissionId: submission.id,
     message: "Votre demande a été transmise à l'administrateur.",
   };
+}
+
+async function recordAnalyticsVisit(body: Record<string, unknown>) {
+  const visitorId = requireUuid(body.visitorId, "visiteur");
+  const sessionId = requireUuid(body.sessionId, "session");
+  const visitId = requireUuid(body.visitId, "visite");
+  const { error } = await supabase.rpc("record_analytics_visit", {
+    p_visitor_id: visitorId,
+    p_session_id: sessionId,
+    p_visit_id: visitId,
+  });
+  if (error) throw error;
+  return { ok: true };
+}
+
+async function recordAnalyticsHeartbeat(body: Record<string, unknown>) {
+  const visitorId = requireUuid(body.visitorId, "visiteur");
+  const sessionId = requireUuid(body.sessionId, "session");
+  const { data, error } = await supabase.rpc("record_analytics_heartbeat", {
+    p_visitor_id: visitorId,
+    p_session_id: sessionId,
+  });
+  if (error) throw error;
+  return { ok: Boolean(data) };
+}
+
+async function recordAnalyticsVideoClick(body: Record<string, unknown>) {
+  const eventId = requireUuid(body.eventId, "clic");
+  const visitorId = requireUuid(body.visitorId, "visiteur");
+  const sessionId = requireUuid(body.sessionId, "session");
+  const youtubeId = cleanText(body.youtubeId, 11);
+  if (!/^[A-Za-z0-9_-]{11}$/.test(youtubeId)) {
+    throw new HttpError(400, "La vidéo est invalide.");
+  }
+
+  const { data, error } = await supabase.rpc("record_analytics_video_click", {
+    p_event_id: eventId,
+    p_visitor_id: visitorId,
+    p_session_id: sessionId,
+    p_youtube_id: youtubeId,
+  });
+  if (error) throw error;
+  return { ok: Boolean(data) };
+}
+
+async function analyticsReport(searchParams: URLSearchParams) {
+  const range = searchParams.get("range") || "7d";
+  const now = new Date();
+  let start: Date | null;
+  let end = now;
+  let bucket = "auto";
+
+  switch (range) {
+    case "24h":
+      start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      bucket = "hour";
+      break;
+    case "7d":
+      start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      bucket = "day";
+      break;
+    case "28d":
+      start = new Date(now.getTime() - 28 * 24 * 60 * 60 * 1000);
+      bucket = "day";
+      break;
+    case "1m":
+      start = new Date(now);
+      start.setUTCMonth(start.getUTCMonth() - 1);
+      bucket = "day";
+      break;
+    case "all":
+      start = null;
+      break;
+    case "custom": {
+      start = parseDateOnly(searchParams.get("from"), "début");
+      const inclusiveEnd = parseDateOnly(searchParams.get("to"), "fin");
+      end = new Date(inclusiveEnd.getTime() + 24 * 60 * 60 * 1000);
+      if (start >= end) {
+        throw new HttpError(400, "La période personnalisée est invalide.");
+      }
+      break;
+    }
+    default:
+      throw new HttpError(400, "La période demandée est invalide.");
+  }
+
+  const { data, error } = await supabase.rpc("analytics_report", {
+    p_start: start?.toISOString() || null,
+    p_end: end.toISOString(),
+    p_bucket: bucket,
+  });
+  if (error) throw error;
+  return data;
 }
 
 async function dashboard() {
@@ -1270,6 +1389,12 @@ function isAllowedOrigin(origin: string) {
   }
 }
 
+function requireAnalyticsOrigin(origin: string) {
+  if (!origin) {
+    throw new HttpError(403, "Origine du site requise.");
+  }
+}
+
 function apiRoute(pathname: string) {
   const index = pathname.indexOf("/api/");
   return index >= 0 ? pathname.slice(index) : pathname;
@@ -1319,6 +1444,25 @@ function clientAddress(request: Request) {
 
 function normalizeCode(value: unknown) {
   return String(value || "").trim().toUpperCase();
+}
+
+function requireUuid(value: unknown, label: string) {
+  const uuid = String(value || "").trim().toLowerCase();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(uuid)) {
+    throw new HttpError(400, `L'identifiant de ${label} est invalide.`);
+  }
+  return uuid;
+}
+
+function parseDateOnly(value: string | null, label: string) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new HttpError(400, `La date de ${label} est invalide.`);
+  }
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+    throw new HttpError(400, `La date de ${label} est invalide.`);
+  }
+  return parsed;
 }
 
 function cleanText(value: unknown, maximum: number) {

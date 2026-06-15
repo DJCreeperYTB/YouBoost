@@ -1,6 +1,7 @@
 const STORAGE_KEYS = {
   profile: "youboost-profile-v1",
   creatorToken: "youboost-creator-token-v1",
+  analyticsVisitor: "youboost-analytics-visitor-v1",
 };
 
 const CONFIGURED_API_BASE_URL = (
@@ -48,6 +49,13 @@ const state = {
   pendingCreatorAction: null,
 };
 
+const analytics = {
+  visitorId: "",
+  sessionId: "",
+  visitId: "",
+  heartbeatTimer: null,
+};
+
 const elements = {
   videoGrid: document.querySelector("#videoGrid"),
   cardTemplate: document.querySelector("#videoCardTemplate"),
@@ -84,6 +92,7 @@ init();
 
 async function init() {
   bindEvents();
+  initializeAnalytics();
   renderCategories();
   document.querySelector("#currentYear").textContent = new Date().getFullYear();
   await restoreCreatorSession();
@@ -425,6 +434,7 @@ function searchCreator(creator) {
 
 function openVideo(video) {
   state.activeVideo = video;
+  trackVideoClick(video.youtubeId);
   learnFromVideo(video, 1);
 
   elements.videoPlayer.src =
@@ -702,6 +712,74 @@ async function loadPublishedVideos() {
     console.warn(error);
     return [];
   }
+}
+
+function initializeAnalytics() {
+  if (!API_IS_CONFIGURED || typeof crypto.randomUUID !== "function") return;
+
+  try {
+    const storedVisitorId = localStorage.getItem(STORAGE_KEYS.analyticsVisitor) || "";
+    analytics.visitorId = isUuid(storedVisitorId) ? storedVisitorId : crypto.randomUUID();
+    if (analytics.visitorId !== storedVisitorId) {
+      localStorage.setItem(STORAGE_KEYS.analyticsVisitor, analytics.visitorId);
+    }
+  } catch {
+    analytics.visitorId = crypto.randomUUID();
+  }
+
+  analytics.sessionId = crypto.randomUUID();
+  analytics.visitId = crypto.randomUUID();
+  postAnalytics("/api/analytics/session", {
+    visitorId: analytics.visitorId,
+    sessionId: analytics.sessionId,
+    visitId: analytics.visitId,
+  });
+
+  analytics.heartbeatTimer = window.setInterval(() => {
+    if (document.visibilityState === "visible") sendAnalyticsHeartbeat();
+  }, 30_000);
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") sendAnalyticsHeartbeat();
+  });
+}
+
+function sendAnalyticsHeartbeat() {
+  if (!analytics.visitorId || !analytics.sessionId) return;
+  postAnalytics("/api/analytics/heartbeat", {
+    visitorId: analytics.visitorId,
+    sessionId: analytics.sessionId,
+  });
+}
+
+function trackVideoClick(youtubeId) {
+  if (!analytics.visitorId || !analytics.sessionId || !youtubeId) return;
+  postAnalytics("/api/analytics/video-click", {
+    eventId: crypto.randomUUID(),
+    visitorId: analytics.visitorId,
+    sessionId: analytics.sessionId,
+    youtubeId,
+  });
+}
+
+async function postAnalytics(path, payload) {
+  try {
+    await fetch(`${API_BASE_URL}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      credentials: "omit",
+      keepalive: true,
+    });
+  } catch {
+    // Analytics must never interrupt browsing.
+  }
+}
+
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    String(value || ""),
+  );
 }
 
 function setSubmissionBusy(isBusy) {
