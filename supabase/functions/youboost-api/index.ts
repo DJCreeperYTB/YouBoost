@@ -390,8 +390,33 @@ async function createCreator(body: Record<string, unknown>) {
     throw new HttpError(400, "Le code doit contenir 6 à 32 lettres, chiffres, _ ou -.");
   }
 
-  const channel = await resolveYouTubeChannel(channelUrl);
   const codeHash = await hmacHex(code, env("CREATOR_CODE_SECRET"));
+  const [emailResult, codeResult] = await Promise.all([
+    supabase.from("creators").select("id").eq("email", email).maybeSingle(),
+    supabase.from("creators").select("id").eq("code_hash", codeHash).maybeSingle(),
+  ]);
+  if (emailResult.error) throw emailResult.error;
+  if (codeResult.error) throw codeResult.error;
+  if (emailResult.data) {
+    throw new HttpError(409, "Cette adresse e-mail possède déjà un compte créateur.");
+  }
+  if (codeResult.data) {
+    throw new HttpError(409, "Ce code créateur est déjà utilisé. Choisissez-en un autre.");
+  }
+
+  const channel = await resolveYouTubeChannel(channelUrl);
+  if (channel.id) {
+    const { data: existingChannel, error: channelError } = await supabase
+      .from("creators")
+      .select("id")
+      .eq("channel_id", channel.id)
+      .maybeSingle();
+    if (channelError) throw channelError;
+    if (existingChannel) {
+      throw new HttpError(409, "Cette chaîne YouTube possède déjà un compte créateur.");
+    }
+  }
+
   const { data: creator, error } = await supabase
     .from("creators")
     .insert({
@@ -409,7 +434,7 @@ async function createCreator(body: Record<string, unknown>) {
     )
     .single();
   if (error?.code === "23505") {
-    throw new HttpError(409, "L'e-mail, la chaîne ou le code est déjà utilisé.");
+    throw new HttpError(409, creatorConflictMessage(error));
   }
   if (error) throw error;
 
@@ -424,6 +449,20 @@ async function createCreator(body: Record<string, unknown>) {
   }
 
   return { creator: toCamelCreator(creator), code, mailSent, mailError };
+}
+
+function creatorConflictMessage(error: any) {
+  const detail = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+  if (detail.includes("creators_email_key") || detail.includes("(email)")) {
+    return "Cette adresse e-mail possède déjà un compte créateur.";
+  }
+  if (detail.includes("creators_channel_id_key") || detail.includes("(channel_id)")) {
+    return "Cette chaîne YouTube possède déjà un compte créateur.";
+  }
+  if (detail.includes("creators_code_hash_key") || detail.includes("(code_hash)")) {
+    return "Ce code créateur est déjà utilisé. Choisissez-en un autre.";
+  }
+  return "Ce compte créateur existe déjà. Actualisez la liste des créateurs.";
 }
 
 async function resetCreatorCode(id: string, body: Record<string, unknown>) {
