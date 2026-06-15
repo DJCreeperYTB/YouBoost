@@ -186,21 +186,47 @@ async function publishedVideos() {
   const { data, error } = await supabase
     .from("videos")
     .select(
-      "id,youtube_id,payload,added_at,creator_id,creator:creators(pro_start_at,pro_end_at,avatar_url)",
+      "id,youtube_id,payload,added_at,creator_id,creator:creators(channel_id,pro_start_at,pro_end_at,avatar_url)",
     )
     .order("added_at", { ascending: false });
   if (error) throw error;
 
-  return (data || []).map((published: any) => ({
-    ...published.payload,
-    databaseId: published.id,
-    youtubeId: published.youtube_id,
-    creatorId: published.creator_id,
-    addedAt: published.payload?.addedAt || published.added_at,
-    isPro: isCreatorPro(published.creator),
-    isApproved: true,
-    creatorAvatar: published.creator?.avatar_url || published.payload?.creatorAvatar || null,
-  }));
+  return Promise.all(
+    (data || []).map(async (published: any) => {
+      const addedAt = published.payload?.addedAt || published.added_at;
+      let payload = published.payload || {};
+
+      if (
+        payload.publishedAtChecked !== true &&
+        (!payload.publishedAt || hasSyntheticPublishedAt(payload.publishedAt, addedAt))
+      ) {
+        const publishedAt = await getYouTubePublishedAt(
+          published.youtube_id,
+          published.creator?.channel_id,
+        );
+        payload = { ...payload, publishedAt, publishedAtChecked: true };
+
+        const { error: updateError } = await supabase
+          .from("videos")
+          .update({ payload })
+          .eq("id", published.id);
+        if (updateError) console.warn("YouTube published date update:", updateError);
+      }
+
+      const { publishedAtChecked: _publishedAtChecked, ...publicPayload } = payload;
+      return {
+        ...publicPayload,
+        databaseId: published.id,
+        youtubeId: published.youtube_id,
+        creatorId: published.creator_id,
+        addedAt,
+        isPro: isCreatorPro(published.creator),
+        isApproved: true,
+        creatorAvatar:
+          published.creator?.avatar_url || publicPayload.creatorAvatar || null,
+      };
+    }),
+  );
 }
 
 async function loginCreator(body: Record<string, unknown>) {
@@ -386,7 +412,18 @@ async function createCreator(body: Record<string, unknown>) {
     throw new HttpError(409, "L'e-mail, la chaîne ou le code est déjà utilisé.");
   }
   if (error) throw error;
-  return { creator: toCamelCreator(creator), code };
+
+  let mailSent = false;
+  let mailError = "";
+  try {
+    await sendGmailCreatorWelcome(creator, code);
+    mailSent = true;
+  } catch (error) {
+    mailError = cleanText(error instanceof Error ? error.message : error, 300);
+    console.error("Gmail creator welcome:", error);
+  }
+
+  return { creator: toCamelCreator(creator), code, mailSent, mailError };
 }
 
 async function resetCreatorCode(id: string, body: Record<string, unknown>) {
@@ -663,6 +700,10 @@ function firstMatch(value: string, pattern: RegExp) {
   return value.match(pattern)?.[1] || "";
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function decodeYouTubeValue(value: unknown) {
   return String(value || "")
     .replaceAll("\\u0026", "&")
@@ -749,13 +790,78 @@ async function getYouTubeVideoFromOEmbed(videoId: string) {
     channelUrl,
     reference: authorReference,
     description: "",
-    publishedAt: new Date().toISOString(),
+    publishedAt: await getYouTubePublishedAt(videoId, channelId),
     duration: "YouTube",
     views: 0,
     subscribers: 0,
     thumbnail:
       payload.thumbnail_url || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
   };
+}
+
+async function getYouTubePublishedAt(videoId: string, channelId: string | null) {
+  if (channelId) {
+    try {
+      const response = await fetch(
+        `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(channelId)}`,
+        { signal: AbortSignal.timeout(12000) },
+      );
+      if (response.ok) {
+        const xml = await response.text();
+        const escapedVideoId = escapeRegExp(videoId);
+        const publishedAt = firstMatch(
+          xml,
+          new RegExp(
+            `<entry>[\\s\\S]*?<yt:videoId>${escapedVideoId}</yt:videoId>[\\s\\S]*?<published>([^<]+)</published>[\\s\\S]*?</entry>`,
+          ),
+        );
+        const timestamp = Date.parse(publishedAt);
+        if (Number.isFinite(timestamp)) return new Date(timestamp).toISOString();
+      }
+    } catch {
+      // Try the public embed metadata below.
+    }
+  }
+
+  return getYouTubePublishedAtFromEmbed(videoId);
+}
+
+async function getYouTubePublishedAtFromEmbed(videoId: string) {
+  try {
+    const response = await fetch(
+      `https://www.youtube.com/embed/${encodeURIComponent(videoId)}`,
+      {
+        headers: {
+          "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.7",
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safari/537.36",
+        },
+        signal: AbortSignal.timeout(12000),
+      },
+    );
+    if (!response.ok) return null;
+
+    const html = await response.text();
+    const publishedAt =
+      firstMatch(html, /"publishDate":"([^"]+)"/) ||
+      firstMatch(html, /"uploadDate":"([^"]+)"/) ||
+      firstMatch(
+        html,
+        /<meta\s+itemprop=["']datePublished["']\s+content=["']([^"']+)["']/i,
+      );
+    const timestamp = Date.parse(publishedAt);
+    return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasSyntheticPublishedAt(publishedAt: unknown, addedAt: unknown) {
+  if (!publishedAt) return false;
+  const publishedTime = Date.parse(String(publishedAt || ""));
+  const addedTime = Date.parse(String(addedAt || ""));
+  if (!Number.isFinite(publishedTime) || !Number.isFinite(addedTime)) return true;
+  return Math.abs(addedTime - publishedTime) < 10 * 60 * 1000;
 }
 
 async function youtubeRequest(resource: string, params: Record<string, string>) {
@@ -773,9 +879,6 @@ async function youtubeRequest(resource: string, params: Record<string, string>) 
 }
 
 async function sendGmailDecision(creator: any, submission: any) {
-  ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN"].forEach(
-    requireSecret,
-  );
   const accepted = submission.status === "accepted";
   const decision = accepted ? "acceptée" : "refusée";
   const reason = submission.review_reason || submission.reviewReason || "";
@@ -797,9 +900,48 @@ async function sendGmailDecision(creator: any, submission: any) {
         <p style="margin-top:28px;color:#667085">L'équipe YouBoost</p>
       </div>
     </div>`;
+
+  await sendGmailMessage(creator.email, subject, html);
+}
+
+async function sendGmailCreatorWelcome(creator: any, code: string) {
+  const subject = "Votre accès créateur YouBoost";
+  const siteUrl = env(
+    "PUBLIC_SITE_URL",
+    "https://djcreeperytb.github.io/YouBoost/",
+  );
+  const html = `
+    <div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#101828">
+      <div style="padding:20px;background:#07142e;color:white;border-radius:14px 14px 0 0">
+        <strong style="font-size:22px">YouBoost</strong>
+      </div>
+      <div style="padding:26px;border:1px solid #e6e8ec;border-top:0;border-radius:0 0 14px 14px">
+        <p>Bonjour ${escapeHtml(creator.channel_title || "créateur")},</p>
+        <p>Votre compte créateur YouBoost vient d'être créé.</p>
+        <p>Votre code personnel est :</p>
+        <p style="margin:24px 0;padding:16px;border-radius:10px;background:#f4f6fa;text-align:center">
+          <strong style="font-size:24px;letter-spacing:2px">${escapeHtml(code)}</strong>
+        </p>
+        <p>Gardez ce code privé. Il vous permet de vous connecter et de proposer vos vidéos.</p>
+        <p>
+          <a href="${escapeHtml(siteUrl)}" style="color:#d92d35;font-weight:700">
+            Ouvrir YouBoost
+          </a>
+        </p>
+        <p style="margin-top:28px;color:#667085">L'équipe YouBoost</p>
+      </div>
+    </div>`;
+
+  await sendGmailMessage(creator.email, subject, html);
+}
+
+async function sendGmailMessage(to: string, subject: string, html: string) {
+  ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN"].forEach(
+    requireSecret,
+  );
   const mime = [
     `From: YouBoost <${env("GMAIL_SENDER", "youboost.creators@gmail.com")}>`,
-    `To: ${creator.email}`,
+    `To: ${to}`,
     `Subject: ${encodeMimeHeader(subject)}`,
     "MIME-Version: 1.0",
     'Content-Type: text/html; charset="UTF-8"',
@@ -858,7 +1000,7 @@ async function sendGmailDecision(creator: any, submission: any) {
     throw new Error(
       googleMessage
         ? `Envoi Gmail refusé : ${googleMessage}`
-        : "L'e-mail de décision n'a pas pu être envoyé.",
+        : "L'e-mail n'a pas pu être envoyé.",
     );
   }
 }

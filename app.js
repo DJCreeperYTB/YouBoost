@@ -282,9 +282,10 @@ function renderCards(videos) {
     const avatar = card.querySelector(".creator-avatar");
     const favoriteButton = card.querySelector(".favorite-button");
     const proBadge = card.querySelector(".pro-badge");
+    const videoMeta = card.querySelector(".video-meta");
 
     card.dataset.videoId = video.id;
-    card.classList.toggle("is-new", daysSince(video.addedAt) <= 7);
+    card.classList.toggle("is-new", isWithinHours(video.addedAt, 7 * 24));
     image.src = video.thumbnail;
     image.alt = `Miniature de ${video.title}`;
     image.addEventListener("error", () => {
@@ -296,7 +297,8 @@ function renderCards(videos) {
     avatar.style.setProperty("--avatar-color", video.accent);
     card.querySelector(".duration").textContent = video.duration;
     proBadge.hidden = !video.isPro;
-    card.querySelector(".video-meta").textContent = relativeDate(video.publishedAt);
+    videoMeta.textContent = relativeDate(video.publishedAt);
+    videoMeta.hidden = !videoMeta.textContent;
 
     video.tags.slice(0, 3).forEach((tag) => {
       const badge = document.createElement("span");
@@ -813,7 +815,9 @@ function formatDate(dateString) {
 }
 
 function relativeDate(dateString) {
+  if (!dateString) return "";
   const days = daysSince(dateString);
+  if (!Number.isFinite(days)) return "";
   if (days <= 0) return "aujourd'hui";
   if (days === 1) return "hier";
   if (days < 7) return `il y a ${days} jours`;
@@ -824,6 +828,13 @@ function relativeDate(dateString) {
 
 function daysSince(dateString) {
   return Math.floor((Date.now() - new Date(dateString).getTime()) / 86_400_000);
+}
+
+function isWithinHours(dateString, hours) {
+  const timestamp = new Date(dateString).getTime();
+  if (!Number.isFinite(timestamp)) return false;
+  const elapsed = Date.now() - timestamp;
+  return elapsed >= 0 && elapsed < hours * 3_600_000;
 }
 
 function initialsFromName(name = "") {
