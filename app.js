@@ -297,7 +297,7 @@ function renderCards(videos) {
     avatar.style.setProperty("--avatar-color", video.accent);
     card.querySelector(".duration").textContent = video.duration;
     proBadge.hidden = !video.isPro;
-    videoMeta.textContent = relativeDate(video.publishedAt);
+    videoMeta.textContent = relativeDate(video.addedAt);
     videoMeta.hidden = !videoMeta.textContent;
 
     video.tags.slice(0, 3).forEach((tag) => {
@@ -816,7 +816,7 @@ function formatDate(dateString) {
 
 function relativeDate(dateString) {
   if (!dateString) return "";
-  const days = daysSince(dateString);
+  const days = calendarDaysSince(dateString);
   if (!Number.isFinite(days)) return "";
   if (days <= 0) return "aujourd'hui";
   if (days === 1) return "hier";
@@ -826,15 +826,43 @@ function relativeDate(dateString) {
   return `il y a ${Math.floor(days / 365)} an${days >= 730 ? "s" : ""}`;
 }
 
+function calendarDaysSince(dateString) {
+  const timestamp = parseDateTimestamp(dateString);
+  if (!Number.isFinite(timestamp)) return Number.NaN;
+  const current = new Date();
+  const target = new Date(timestamp);
+  const currentDay = Date.UTC(
+    current.getFullYear(),
+    current.getMonth(),
+    current.getDate(),
+  );
+  const targetDay = Date.UTC(target.getFullYear(), target.getMonth(), target.getDate());
+  return Math.floor((currentDay - targetDay) / 86_400_000);
+}
+
 function daysSince(dateString) {
-  return Math.floor((Date.now() - new Date(dateString).getTime()) / 86_400_000);
+  if (!dateString) return Number.NaN;
+  const timestamp = parseDateTimestamp(dateString);
+  if (!Number.isFinite(timestamp)) return Number.NaN;
+  return Math.floor((Date.now() - timestamp) / 86_400_000);
 }
 
 function isWithinHours(dateString, hours) {
-  const timestamp = new Date(dateString).getTime();
+  const timestamp = parseDateTimestamp(dateString);
   if (!Number.isFinite(timestamp)) return false;
   const elapsed = Date.now() - timestamp;
   return elapsed >= 0 && elapsed < hours * 3_600_000;
+}
+
+function parseDateTimestamp(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return Number.NaN;
+  const normalized = raw
+    .replace(
+      /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}(?:\.\d+)?)([+-]\d{2})$/,
+      "$1T$2$3:00",
+    );
+  return new Date(normalized).getTime();
 }
 
 function initialsFromName(name = "") {
