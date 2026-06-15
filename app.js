@@ -29,6 +29,7 @@ const CATEGORIES = [
 ];
 
 const DEFAULT_PROFILE = {
+  rankingVersion: 2,
   categoryWeights: {},
   tagWeights: {},
   creatorWeights: {},
@@ -39,7 +40,7 @@ const DEFAULT_PROFILE = {
 
 const state = {
   videos: [],
-  profile: loadJson(STORAGE_KEYS.profile, DEFAULT_PROFILE),
+  profile: loadProfile(),
   view: "recommended",
   sort: "recommended",
   category: "Tout",
@@ -99,6 +100,7 @@ async function init() {
 
   const publishedVideos = await loadPublishedVideos();
   state.videos = publishedVideos.map(normalizeVideo);
+  migrateRecommendationProfile();
   render();
 
   if (!state.videos.length) {
@@ -219,6 +221,8 @@ function getVisibleVideos() {
 
   if (state.view === "favorites") {
     videos = videos.filter((video) => state.profile.favorites.includes(video.id));
+  } else if (state.view === "recommended" && !normalizedQuery) {
+    videos = videos.filter((video) => !state.profile.favorites.includes(video.id));
   }
 
   if (state.category !== "Tout") {
@@ -234,13 +238,23 @@ function getVisibleVideos() {
   }
 
   if (state.view === "explore") {
-    return videos.sort((a, b) => discoveryScore(b) - discoveryScore(a));
+    return spreadProVideos(videos.sort((a, b) => discoveryScore(b) - discoveryScore(a)));
   }
 
-  return videos.sort((a, b) => recommendationScore(b) - recommendationScore(a));
+  const favoriteSeeds = state.videos.filter(
+    (video) =>
+      state.profile.favorites.includes(video.id) &&
+      !state.profile.hidden.includes(video.id),
+  );
+  return spreadProVideos(
+    videos.sort(
+      (a, b) =>
+        recommendationScore(b, favoriteSeeds) - recommendationScore(a, favoriteSeeds),
+    ),
+  );
 }
 
-function recommendationScore(video) {
+function recommendationScore(video, favoriteSeeds) {
   const categoryAffinity = state.profile.categoryWeights[video.category] || 0;
   const creatorAffinity = state.profile.creatorWeights[video.creator] || 0;
   const tagAffinity = video.tags.reduce(
@@ -252,8 +266,8 @@ function recommendationScore(video) {
   const freshness = Math.max(0, 28 - freshnessDays) * 0.45;
   const smallCreatorBoost = Math.max(0, 10000 - video.subscribers) / 1500;
   const exploration = seededNumber(`${video.id}-${todayKey()}`) * 5;
-  const favoriteBoost = state.profile.favorites.includes(video.id) ? 4 : 0;
-  const proBoost = video.isPro ? 12 : 0;
+  const favoriteAffinity = favoriteSimilarityScore(video, favoriteSeeds);
+  const proBoost = video.isPro ? 3.5 : 0;
   const approvedBoost = video.isApproved ? 16 : 0;
   const repeatPenalty = watchedCount * 6;
 
@@ -264,7 +278,7 @@ function recommendationScore(video) {
     freshness +
     smallCreatorBoost +
     exploration +
-    favoriteBoost -
+    favoriteAffinity -
     repeatPenalty +
     proBoost +
     approvedBoost
@@ -274,8 +288,49 @@ function recommendationScore(video) {
 function discoveryScore(video) {
   const smallCreatorBoost = Math.max(0, 12000 - video.subscribers) / 1000;
   const freshness = Math.max(0, 45 - daysSince(video.addedAt)) * 0.2;
-  const proBoost = video.isPro ? 10 : 0;
+  const proBoost = video.isPro ? 2.5 : 0;
   return smallCreatorBoost + freshness + seededNumber(`${todayKey()}-${video.id}`) * 10 + proBoost;
+}
+
+function favoriteSimilarityScore(video, favoriteSeeds) {
+  const similarities = favoriteSeeds
+    .filter((favorite) => favorite.id !== video.id)
+    .map((favorite) => {
+      const favoriteTags = new Set(favorite.tags.map(normalizeText));
+      const sharedTags = video.tags.filter((tag) => favoriteTags.has(normalizeText(tag))).length;
+      return (
+        (favorite.category === video.category ? 2.5 : 0) +
+        (favorite.creator === video.creator ? 4 : 0) +
+        Math.min(sharedTags, 3) * 1.5
+      );
+    })
+    .filter((score) => score > 0)
+    .sort((a, b) => b - a);
+
+  return (
+    (similarities[0] || 0) +
+    (similarities[1] || 0) * 0.55 +
+    (similarities[2] || 0) * 0.3
+  );
+}
+
+function spreadProVideos(videos) {
+  const result = [];
+  const deferredProVideos = [];
+
+  videos.forEach((video) => {
+    if (video.isPro && result.at(-1)?.isPro) {
+      deferredProVideos.push(video);
+      return;
+    }
+
+    result.push(video);
+    if (!video.isPro && deferredProVideos.length) {
+      result.push(deferredProVideos.shift());
+    }
+  });
+
+  return result.concat(deferredProVideos);
 }
 
 function renderCards(videos) {
@@ -473,12 +528,10 @@ function toggleFavorite(videoId) {
   const index = state.profile.favorites.indexOf(videoId);
   if (index >= 0) {
     state.profile.favorites.splice(index, 1);
-    learnFromVideo(video, -0.6, false);
     showToast("Vidéo retirée des favoris.");
   } else {
     state.profile.favorites.push(videoId);
-    learnFromVideo(video, 2.5, false);
-    showToast("Vidéo ajoutée aux favoris. Votre fil s'adapte.");
+    showToast("Vidéo ajoutée aux favoris. Des contenus similaires seront proposés.");
   }
 
   saveProfile();
@@ -970,16 +1023,40 @@ function saveProfile() {
   localStorage.setItem(STORAGE_KEYS.profile, JSON.stringify(state.profile));
 }
 
-function loadJson(key, fallback) {
+function loadProfile() {
   try {
-    const value = localStorage.getItem(key);
-    if (!value) return structuredClone(fallback);
+    const value = localStorage.getItem(STORAGE_KEYS.profile);
+    if (!value) return structuredClone(DEFAULT_PROFILE);
     const parsed = JSON.parse(value);
-    if (Array.isArray(fallback)) return Array.isArray(parsed) ? parsed : structuredClone(fallback);
-    return { ...structuredClone(fallback), ...parsed };
+    return {
+      ...structuredClone(DEFAULT_PROFILE),
+      ...parsed,
+      rankingVersion: Number(parsed.rankingVersion) || 1,
+    };
   } catch {
-    return structuredClone(fallback);
+    return structuredClone(DEFAULT_PROFILE);
   }
+}
+
+function migrateRecommendationProfile() {
+  if (state.profile.rankingVersion >= 2 || !state.videos.length) return;
+
+  state.profile.categoryWeights = {};
+  state.profile.creatorWeights = {};
+  state.profile.tagWeights = {};
+
+  state.videos.forEach((video) => {
+    const watchedCount = Math.min(3, Number(state.profile.watched[video.id]) || 0);
+    if (!watchedCount) return;
+    incrementWeight(state.profile.categoryWeights, video.category, watchedCount);
+    incrementWeight(state.profile.creatorWeights, video.creator, watchedCount);
+    video.tags.forEach((tag) => {
+      incrementWeight(state.profile.tagWeights, tag, watchedCount * 0.65);
+    });
+  });
+
+  state.profile.rankingVersion = 2;
+  saveProfile();
 }
 
 function showToast(message) {
