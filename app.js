@@ -296,8 +296,7 @@ function renderCards(videos) {
     avatar.style.setProperty("--avatar-color", video.accent);
     card.querySelector(".duration").textContent = video.duration;
     proBadge.hidden = !video.isPro;
-    card.querySelector(".video-meta").textContent =
-      `${formatNumber(video.views)} vues · ${relativeDate(video.publishedAt)}`;
+    card.querySelector(".video-meta").textContent = relativeDate(video.publishedAt);
 
     video.tags.slice(0, 3).forEach((tag) => {
       const badge = document.createElement("span");
@@ -431,8 +430,6 @@ function openVideo(video) {
   document.querySelector("#dialogCategory").textContent = video.category;
   document.querySelector("#dialogTitle").textContent = video.title;
   document.querySelector("#dialogCreator").textContent = video.creator;
-  document.querySelector("#dialogSubscribers").textContent =
-    `${formatNumber(video.subscribers)} abonnés`;
   document.querySelector("#dialogDescription").textContent = video.description;
   const dialogAvatar = document.querySelector("#dialogAvatar");
   renderChannelAvatar(dialogAvatar, video);
@@ -804,13 +801,6 @@ function normalizeText(value) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
-}
-
-function formatNumber(value) {
-  return new Intl.NumberFormat("fr-FR", {
-    notation: value >= 1000 ? "compact" : "standard",
-    maximumFractionDigits: 1,
-  }).format(value);
 }
 
 function formatDate(dateString) {
