@@ -28,6 +28,12 @@ const CATEGORIES = [
   { name: "Voyage", color: "#0f766e" },
 ];
 
+const DOMAIN_FUND = {
+  goal: 25,
+  collected: 0,
+  paypalUrl: "https://paypal.me/djcreeperytb",
+};
+
 const DEFAULT_PROFILE = {
   rankingVersion: 2,
   categoryWeights: {},
@@ -48,6 +54,7 @@ const state = {
   activeVideo: null,
   creator: null,
   pendingCreatorAction: null,
+  studioRange: "7d",
 };
 
 const analytics = {
@@ -84,6 +91,23 @@ const elements = {
   creatorLoginStatus: document.querySelector("#creatorLoginStatus"),
   plansDialog: document.querySelector("#plansDialog"),
   paymentDialog: document.querySelector("#paymentDialog"),
+  studioDialog: document.querySelector("#studioDialog"),
+  studioSubtitle: document.querySelector("#studioSubtitle"),
+  studioStatus: document.querySelector("#studioStatus"),
+  studioRangeLabel: document.querySelector("#studioRangeLabel"),
+  studioClicks: document.querySelector("#studioClicks"),
+  studioUniqueVisitors: document.querySelector("#studioUniqueVisitors"),
+  studioAudienceShare: document.querySelector("#studioAudienceShare"),
+  studioClickShare: document.querySelector("#studioClickShare"),
+  studioVideoCount: document.querySelector("#studioVideoCount"),
+  studioAverageClicks: document.querySelector("#studioAverageClicks"),
+  studioEstimatedClicks: document.querySelector("#studioEstimatedClicks"),
+  studioEstimatedVisitors: document.querySelector("#studioEstimatedVisitors"),
+  studioProLift: document.querySelector("#studioProLift"),
+  studioProText: document.querySelector("#studioProText"),
+  studioUpgradeButton: document.querySelector("#studioUpgradeButton"),
+  studioChart: document.querySelector("#studioChart"),
+  studioVideoList: document.querySelector("#studioVideoList"),
   profileAvatar: document.querySelector("#profileAvatar"),
   profileAvatarFallback: document.querySelector("#profileAvatarFallback"),
   toast: document.querySelector("#toast"),
@@ -94,6 +118,7 @@ init();
 async function init() {
   bindEvents();
   initializeAnalytics();
+  renderDomainFund();
   renderCategories();
   document.querySelector("#currentYear").textContent = new Date().getFullYear();
   await restoreCreatorSession();
@@ -151,8 +176,15 @@ function bindEvents() {
     .querySelector("#accountUpgradeButton")
     .addEventListener("click", openPlansDialog);
   document
+    .querySelector("#accountStudioButton")
+    .addEventListener("click", openStudioDialog);
+  document
     .querySelector("#creatorLogoutButton")
     .addEventListener("click", logoutCreator);
+  elements.studioUpgradeButton.addEventListener("click", () => {
+    if (elements.studioDialog.open) elements.studioDialog.close();
+    openPlansDialog();
+  });
   document
     .querySelector("#chooseProButton")
     .addEventListener("click", openPaymentWarning);
@@ -160,6 +192,12 @@ function bindEvents() {
     .querySelector("#continuePaypalButton")
     .addEventListener("click", continueToPaypal);
   elements.creatorLoginForm.addEventListener("submit", loginCreator);
+  document.querySelectorAll("[data-studio-range]").forEach((button) => {
+    button.addEventListener("click", () => selectStudioRange(button.dataset.studioRange));
+  });
+  document.querySelectorAll("[data-domain-fund-button]").forEach((button) => {
+    button.addEventListener("click", openDomainFund);
+  });
 
   document.querySelector("#discoverButton").addEventListener("click", () => {
     document.querySelector(".feed").scrollIntoView({ behavior: "smooth" });
@@ -188,6 +226,7 @@ function bindEvents() {
   elements.videoDialog.addEventListener("click", closeOnBackdrop);
   elements.submitDialog.addEventListener("click", closeOnBackdrop);
   elements.accountDialog.addEventListener("click", closeOnBackdrop);
+  elements.studioDialog.addEventListener("click", closeOnBackdrop);
   elements.plansDialog.addEventListener("click", closeOnBackdrop);
   elements.paymentDialog.addEventListener("click", closeOnBackdrop);
   elements.submitForm.addEventListener("submit", submitVideoRequest);
@@ -410,6 +449,28 @@ function renderCategories() {
   });
 }
 
+function renderDomainFund() {
+  const goal = Math.max(1, Number(DOMAIN_FUND.goal) || 1);
+  const collected = Math.max(0, Number(DOMAIN_FUND.collected) || 0);
+  const ratio = Math.min(1, collected / goal);
+  const percent = Math.round(ratio * 100);
+  const label = `${formatMoney(collected)} collectés sur ${formatMoney(goal)}`;
+
+  document.querySelectorAll("[data-domain-fund-progress]").forEach((bar) => {
+    bar.style.width = `${percent}%`;
+  });
+  document.querySelectorAll("[data-domain-fund-label]").forEach((labelElement) => {
+    labelElement.textContent = label;
+  });
+  document.querySelectorAll("[data-domain-fund-percent]").forEach((percentElement) => {
+    percentElement.textContent = `${percent}%`;
+  });
+}
+
+function openDomainFund() {
+  window.open(DOMAIN_FUND.paypalUrl, "_blank", "noopener,noreferrer");
+}
+
 function createCategoryChip(name) {
   const button = document.createElement("button");
   button.type = "button";
@@ -595,10 +656,12 @@ function openAccountDialog() {
 function requireCreatorFor(action) {
   if (state.creator && localStorage.getItem(STORAGE_KEYS.creatorToken)) return true;
   state.pendingCreatorAction = action;
-  elements.creatorLoginStatus.textContent =
-    action === "submit"
-      ? "Connectez-vous pour ajouter une vidéo."
-      : "Connectez-vous avant de choisir le forfait Pro.";
+  const messages = {
+    submit: "Connectez-vous pour ajouter une vidéo.",
+    upgrade: "Connectez-vous avant de choisir le forfait Pro.",
+    studio: "Connectez-vous pour ouvrir YouBoost Studio.",
+  };
+  elements.creatorLoginStatus.textContent = messages[action] || "Connectez-vous pour continuer.";
   renderCreatorAccount();
   elements.accountDialog.showModal();
   return false;
@@ -636,6 +699,7 @@ async function loginCreator(event) {
     showToast(`Connecté en tant que ${state.creator.channelTitle || "créateur"}.`);
     if (action === "submit") openSubmitDialog();
     if (action === "upgrade") openPlansDialog();
+    if (action === "studio") openStudioDialog();
   } catch (error) {
     elements.creatorLoginStatus.textContent = error.message;
   } finally {
@@ -673,9 +737,227 @@ function renderCreatorAccount() {
     : "Mise en avant naturelle";
 }
 
+function openStudioDialog() {
+  if (!requireCreatorFor("studio")) return;
+  if (elements.accountDialog.open) elements.accountDialog.close();
+  elements.studioSubtitle.textContent =
+    `Chaîne suivie : ${state.creator.channelTitle || state.creator.email || "créateur"}.`;
+  elements.studioDialog.showModal();
+  loadStudioStats();
+}
+
+function selectStudioRange(range) {
+  state.studioRange = range;
+  document.querySelectorAll("[data-studio-range]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.studioRange === range);
+  });
+  if (elements.studioDialog.open) loadStudioStats();
+}
+
+async function loadStudioStats() {
+  if (!API_IS_CONFIGURED) {
+    elements.studioStatus.textContent = "Le service Studio n'est pas encore configuré.";
+    return;
+  }
+
+  const token = localStorage.getItem(STORAGE_KEYS.creatorToken);
+  if (!token) {
+    elements.studioStatus.textContent = "Reconnectez-vous pour ouvrir YouBoost Studio.";
+    return;
+  }
+
+  elements.studioDialog.classList.add("is-loading");
+  elements.studioStatus.textContent = "Chargement des statistiques…";
+
+  try {
+    const params = new URLSearchParams({ range: state.studioRange });
+    const response = await fetch(`${API_BASE_URL}/api/creator/studio?${params}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (response.status === 401) {
+        localStorage.removeItem(STORAGE_KEYS.creatorToken);
+        state.creator = null;
+        renderCreatorAccount();
+      }
+      throw new Error(result.error || "Statistiques indisponibles.");
+    }
+    elements.studioStatus.textContent = "";
+    renderStudioStats(result);
+  } catch (error) {
+    elements.studioStatus.textContent = error.message;
+  } finally {
+    elements.studioDialog.classList.remove("is-loading");
+  }
+}
+
+function renderStudioStats(data) {
+  const summary = data.summary || {};
+  const estimatedPro = summary.estimatedPro || {};
+  const videos = Array.isArray(data.videos) ? data.videos : [];
+
+  elements.studioRangeLabel.textContent = studioRangeLabel(data.range);
+  elements.studioClicks.textContent = formatInteger(summary.totalClicks);
+  elements.studioUniqueVisitors.textContent = formatInteger(summary.uniqueVisitors);
+  elements.studioAudienceShare.textContent = formatPercent(summary.audienceShare);
+  elements.studioClickShare.textContent = formatPercent(summary.clickShare);
+  elements.studioVideoCount.textContent = formatInteger(summary.videoCount);
+  elements.studioAverageClicks.textContent = formatInteger(summary.averageClicksPerVideo);
+  elements.studioEstimatedClicks.textContent = formatInteger(estimatedPro.estimatedClicks);
+  elements.studioEstimatedVisitors.textContent = formatInteger(
+    estimatedPro.estimatedUniqueVisitors,
+  );
+
+  if (summary.isPro) {
+    elements.studioProLift.textContent = "Actif";
+    elements.studioProText.textContent =
+      "Le bonus Pro est déjà inclus dans vos recommandations actuelles.";
+    elements.studioUpgradeButton.hidden = true;
+  } else {
+    elements.studioProLift.textContent = `+${formatPercent(estimatedPro.liftPercent)}`;
+    elements.studioProText.textContent =
+      `${formatInteger(estimatedPro.extraClicks)} clics et ` +
+      `${formatInteger(estimatedPro.extraUniqueVisitors)} visiteurs uniques potentiels en plus sur cette période.`;
+    elements.studioUpgradeButton.hidden = false;
+  }
+
+  renderStudioChart(Array.isArray(data.clicks) ? data.clicks : [], data.range?.bucket);
+  renderStudioVideos(videos);
+}
+
+function renderStudioChart(series, bucket) {
+  elements.studioChart.replaceChildren();
+  if (!series.length) {
+    const empty = document.createElement("p");
+    empty.className = "studio-empty";
+    empty.textContent = "Aucun clic enregistré sur cette période.";
+    elements.studioChart.append(empty);
+    return;
+  }
+
+  const namespace = "http://www.w3.org/2000/svg";
+  const width = 720;
+  const height = 190;
+  const padding = { top: 18, right: 16, bottom: 34, left: 38 };
+  const values = series.map((item) => Math.max(0, Number(item.value) || 0));
+  const maximum = Math.max(1, ...values);
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const points = series.map((item, index) => {
+    const x =
+      padding.left + (series.length === 1 ? plotWidth / 2 : (plotWidth * index) / (series.length - 1));
+    const y = padding.top + plotHeight - (values[index] / maximum) * plotHeight;
+    return { x, y, item, value: values[index] };
+  });
+
+  const svg = document.createElementNS(namespace, "svg");
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Courbe des clics YouBoost Studio");
+
+  for (let index = 0; index <= 3; index += 1) {
+    const y = padding.top + (plotHeight * index) / 3;
+    const line = document.createElementNS(namespace, "line");
+    line.setAttribute("x1", padding.left);
+    line.setAttribute("x2", width - padding.right);
+    line.setAttribute("y1", y);
+    line.setAttribute("y2", y);
+    line.setAttribute("class", "studio-grid-line");
+    svg.append(line);
+  }
+
+  const area = document.createElementNS(namespace, "path");
+  area.setAttribute(
+    "d",
+    [
+      `M ${points[0].x} ${padding.top + plotHeight}`,
+      ...points.map((point) => `L ${point.x} ${point.y}`),
+      `L ${points.at(-1).x} ${padding.top + plotHeight}`,
+      "Z",
+    ].join(" "),
+  );
+  area.setAttribute("class", "studio-chart-area");
+  svg.append(area);
+
+  const line = document.createElementNS(namespace, "polyline");
+  line.setAttribute("points", points.map((point) => `${point.x},${point.y}`).join(" "));
+  line.setAttribute("class", "studio-chart-line");
+  svg.append(line);
+
+  points.forEach((point) => {
+    const circle = document.createElementNS(namespace, "circle");
+    circle.setAttribute("cx", point.x);
+    circle.setAttribute("cy", point.y);
+    circle.setAttribute("r", 3.5);
+    circle.setAttribute("class", "studio-chart-point");
+    const title = document.createElementNS(namespace, "title");
+    title.textContent = `${formatStudioChartDate(point.item.at, bucket)} : ${formatInteger(point.value)} clics`;
+    circle.append(title);
+    svg.append(circle);
+  });
+
+  [...new Set([0, Math.floor((series.length - 1) / 2), series.length - 1])].forEach((index) => {
+    const point = points[index];
+    const label = document.createElementNS(namespace, "text");
+    label.setAttribute("x", point.x);
+    label.setAttribute("y", height - 12);
+    label.setAttribute("text-anchor", index === 0 ? "start" : index === series.length - 1 ? "end" : "middle");
+    label.setAttribute("class", "studio-axis-label");
+    label.textContent = formatStudioChartDate(point.item.at, bucket);
+    svg.append(label);
+  });
+
+  elements.studioChart.append(svg);
+}
+
+function renderStudioVideos(videos) {
+  elements.studioVideoList.replaceChildren();
+  if (!videos.length) {
+    const empty = document.createElement("p");
+    empty.className = "studio-empty";
+    empty.textContent = "Aucune vidéo publiée pour cette chaîne.";
+    elements.studioVideoList.append(empty);
+    return;
+  }
+
+  videos.forEach((video) => {
+    const item = document.createElement("article");
+    item.className = "studio-video-item";
+
+    const image = document.createElement("img");
+    image.src =
+      video.thumbnail ||
+      `https://i.ytimg.com/vi/${encodeURIComponent(video.youtubeId)}/hqdefault.jpg`;
+    image.alt = "";
+
+    const content = document.createElement("div");
+    content.className = "studio-video-item__content";
+    const title = document.createElement("strong");
+    title.textContent = video.title || "Vidéo YouTube";
+    const meta = document.createElement("span");
+    meta.textContent = `${formatInteger(video.uniqueVisitors)} visiteurs uniques`;
+    content.append(title, meta);
+
+    const metrics = document.createElement("div");
+    metrics.className = "studio-video-item__metrics";
+    const clicks = document.createElement("strong");
+    clicks.textContent = formatInteger(video.clicks);
+    const clicksLabel = document.createElement("span");
+    clicksLabel.textContent = Number(video.clicks) === 1 ? "clic" : "clics";
+    const estimate = document.createElement("small");
+    estimate.textContent = `Pro estimé : ${formatInteger(video.estimatedProClicks)} clics`;
+    metrics.append(clicks, clicksLabel, estimate);
+
+    item.append(image, content, metrics);
+    elements.studioVideoList.append(item);
+  });
+}
+
 function openPlansDialog() {
   if (!requireCreatorFor("upgrade")) return;
   if (elements.accountDialog.open) elements.accountDialog.close();
+  if (elements.studioDialog.open) elements.studioDialog.close();
   elements.plansDialog.showModal();
 }
 
@@ -943,6 +1225,69 @@ function formatDate(dateString) {
     month: "long",
     year: "numeric",
   }).format(new Date(dateString));
+}
+
+function formatInteger(value) {
+  return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(
+    Number(value) || 0,
+  );
+}
+
+function formatMoney(value) {
+  return new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: "EUR",
+    maximumFractionDigits: 0,
+  }).format(Number(value) || 0);
+}
+
+function formatPercent(value) {
+  return new Intl.NumberFormat("fr-FR", {
+    style: "percent",
+    maximumFractionDigits: Number(value) > 0 && Number(value) < 0.1 ? 1 : 0,
+  }).format(Number(value) || 0);
+}
+
+function studioRangeLabel(range) {
+  if (!range?.start || !range?.end) return "";
+  const start = new Date(range.start);
+  const end = new Date(range.end);
+  const date = new Intl.DateTimeFormat("fr-FR", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+  if (state.studioRange === "24h") {
+    const dateTime = new Intl.DateTimeFormat("fr-FR", {
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    return `${dateTime.format(start)} au ${dateTime.format(end)}`;
+  }
+  return `${date.format(start)} au ${date.format(end)}`;
+}
+
+function formatStudioChartDate(value, bucket) {
+  const date = new Date(value);
+  if (bucket === "hour") {
+    return new Intl.DateTimeFormat("fr-FR", {
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+    }).format(date);
+  }
+  if (bucket === "month") {
+    return new Intl.DateTimeFormat("fr-FR", {
+      month: "short",
+      year: "2-digit",
+    }).format(date);
+  }
+  return new Intl.DateTimeFormat("fr-FR", {
+    day: "2-digit",
+    month: "short",
+  }).format(date);
 }
 
 function relativeDate(dateString) {

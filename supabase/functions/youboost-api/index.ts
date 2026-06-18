@@ -113,11 +113,25 @@ Deno.serve(async (request) => {
       return json(200, { creator: await getCreatorProfile(session.creatorId) }, corsHeaders);
     }
 
+    if (request.method === "GET" && route === "/api/creator/studio") {
+      const session = await requireCreator(request);
+      return json(
+        200,
+        await creatorStudioReport(session.creatorId, requestUrl.searchParams),
+        corsHeaders,
+      );
+    }
+
     if (request.method === "POST" && route === "/api/submissions") {
       await enforceRateLimit(`submission:${clientAddress(request)}`, 900, 12);
       const session = await requireCreator(request);
       const result = await createSubmission(session.creatorId, await readJson(request));
       return json(201, result, corsHeaders);
+    }
+
+    if (request.method === "POST" && route === "/api/cron/weekly-creator-reports") {
+      await requireCron(request);
+      return json(200, await sendWeeklyCreatorReports({ source: "cron" }), corsHeaders);
     }
 
     if (request.method === "POST" && route === "/api/admin/login") {
@@ -137,6 +151,33 @@ Deno.serve(async (request) => {
       }
       if (request.method === "GET" && route === "/api/admin/analytics") {
         return json(200, await analyticsReport(requestUrl.searchParams), corsHeaders);
+      }
+      if (request.method === "POST" && route === "/api/admin/creators/broadcast-email") {
+        return json(
+          200,
+          await sendCreatorBroadcastEmail(await readJson(request)),
+          corsHeaders,
+        );
+      }
+      if (request.method === "POST" && route === "/api/admin/reports/weekly") {
+        return json(
+          200,
+          await sendWeeklyCreatorReports({
+            source: "admin",
+            force: Boolean((await readJson(request)).force),
+          }),
+          corsHeaders,
+        );
+      }
+      const creatorStudioMatch = route.match(
+        /^\/api\/admin\/creators\/([a-f0-9-]+)\/studio$/,
+      );
+      if (request.method === "GET" && creatorStudioMatch) {
+        return json(
+          200,
+          await creatorStudioReport(creatorStudioMatch[1], requestUrl.searchParams),
+          corsHeaders,
+        );
       }
       if (request.method === "POST" && route === "/api/admin/creators") {
         return json(201, await createCreator(await readJson(request)), corsHeaders);
@@ -408,6 +449,44 @@ async function recordAnalyticsVideoClick(body: Record<string, unknown>) {
 }
 
 async function analyticsReport(searchParams: URLSearchParams) {
+  const { start, end, bucket } = reportPeriod(searchParams);
+
+  const { data, error } = await supabase.rpc("analytics_report", {
+    p_start: start?.toISOString() || null,
+    p_end: end.toISOString(),
+    p_bucket: bucket,
+  });
+  if (error) throw error;
+  return data;
+}
+
+async function creatorStudioReport(creatorId: string, searchParams: URLSearchParams) {
+  const { start, end, bucket } = reportPeriod(searchParams);
+  const { data: creator, error: creatorError } = await supabase
+    .from("creators")
+    .select(
+      "id,email,channel_url,channel_id,channel_title,canonical_channel_url,avatar_url,code_last4,code_changed_at,created_at,pro_start_at,pro_end_at",
+    )
+    .eq("id", creatorId)
+    .maybeSingle();
+  if (creatorError) throw creatorError;
+  if (!creator) throw new HttpError(404, "Créateur introuvable.");
+
+  const { data, error } = await supabase.rpc("creator_studio_report", {
+    p_creator_id: creatorId,
+    p_start: start?.toISOString() || null,
+    p_end: end.toISOString(),
+    p_bucket: bucket,
+  });
+  if (error) throw error;
+
+  return {
+    ...(data || {}),
+    creator: toCamelCreator(creator),
+  };
+}
+
+function reportPeriod(searchParams: URLSearchParams) {
   const range = searchParams.get("range") || "7d";
   const now = new Date();
   let start: Date | null;
@@ -448,13 +527,231 @@ async function analyticsReport(searchParams: URLSearchParams) {
       throw new HttpError(400, "La période demandée est invalide.");
   }
 
-  const { data, error } = await supabase.rpc("analytics_report", {
-    p_start: start?.toISOString() || null,
-    p_end: end.toISOString(),
-    p_bucket: bucket,
+  return { start, end, bucket };
+}
+
+async function sendCreatorBroadcastEmail(body: Record<string, unknown>) {
+  const subject = cleanText(body.subject, 140);
+  const message = cleanEmailBody(body.message, 5000);
+  if (subject.length < 4) throw new HttpError(400, "Ajoutez un objet plus explicite.");
+  if (message.length < 10) throw new HttpError(400, "Ajoutez un message à envoyer.");
+
+  const creators = await emailCreatorRecipients();
+  const batchId = crypto.randomUUID();
+  const results = [];
+
+  for (const creator of creators) {
+    try {
+      await sendGmailBroadcast(creator, subject, message);
+      await recordCreatorEmailLog({
+        kind: "broadcast",
+        creatorId: creator.id,
+        recipientEmail: creator.email,
+        subject,
+        status: "sent",
+        metadata: { batchId },
+        sentAt: new Date().toISOString(),
+      });
+      results.push({ creatorId: creator.id, email: creator.email, ok: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await recordCreatorEmailLog({
+        kind: "broadcast",
+        creatorId: creator.id,
+        recipientEmail: creator.email,
+        subject,
+        status: "failed",
+        error: cleanText(message, 500),
+        metadata: { batchId },
+      });
+      results.push({
+        creatorId: creator.id,
+        email: creator.email,
+        ok: false,
+        error: message,
+      });
+    }
+  }
+
+  return summarizeEmailResults(results, { batchId, totalCreators: creators.length });
+}
+
+async function sendWeeklyCreatorReports(options: { source: string; force?: boolean }) {
+  const creators = await emailCreatorRecipients();
+  const params = new URLSearchParams({ range: "7d" });
+  const periodKey = weeklyReportPeriodKey();
+  const periodLabel = weeklyReportLabel();
+  const results = [];
+
+  for (const creator of creators) {
+    try {
+      if (!options.force && (await weeklyReportAlreadySent(creator.id, periodKey))) {
+        results.push({ creatorId: creator.id, email: creator.email, ok: true, skipped: true });
+        continue;
+      }
+
+      const report = await creatorStudioReport(creator.id, params);
+      const subject = `Votre rapport YouBoost - ${periodLabel}`;
+      await sendGmailWeeklyReport(creator, report, subject);
+      await recordCreatorEmailLog({
+        kind: "weekly_report",
+        creatorId: creator.id,
+        recipientEmail: creator.email,
+        subject,
+        periodKey,
+        status: "sent",
+        metadata: {
+          source: options.source,
+          summary: report.summary || {},
+        },
+        sentAt: new Date().toISOString(),
+      });
+      results.push({ creatorId: creator.id, email: creator.email, ok: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await recordCreatorEmailLog({
+        kind: "weekly_report",
+        creatorId: creator.id,
+        recipientEmail: creator.email,
+        subject: `Votre rapport YouBoost - ${periodLabel}`,
+        periodKey,
+        status: "failed",
+        error: cleanText(message, 500),
+        metadata: { source: options.source },
+      });
+      results.push({
+        creatorId: creator.id,
+        email: creator.email,
+        ok: false,
+        error: message,
+      });
+    }
+  }
+
+  return summarizeEmailResults(results, {
+    periodKey,
+    totalCreators: creators.length,
   });
+}
+
+async function emailCreatorRecipients() {
+  const { data, error } = await supabase
+    .from("creators")
+    .select(
+      "id,email,channel_url,channel_id,channel_title,canonical_channel_url,avatar_url,code_last4,code_changed_at,created_at,pro_start_at,pro_end_at",
+    )
+    .order("created_at", { ascending: false });
   if (error) throw error;
-  return data;
+  return (data || [])
+    .map(toCamelCreator)
+    .filter((creator: any) => isEmailAddress(creator.email));
+}
+
+async function weeklyReportAlreadySent(creatorId: string, periodKey: string) {
+  const { data, error } = await supabase
+    .from("creator_email_logs")
+    .select("id")
+    .eq("kind", "weekly_report")
+    .eq("creator_id", creatorId)
+    .eq("period_key", periodKey)
+    .eq("status", "sent")
+    .maybeSingle();
+  if (error) throw error;
+  return Boolean(data);
+}
+
+async function recordCreatorEmailLog(entry: {
+  kind: "broadcast" | "weekly_report";
+  creatorId: string;
+  recipientEmail: string;
+  subject: string;
+  status: "sent" | "failed" | "skipped";
+  periodKey?: string;
+  error?: string;
+  metadata?: Record<string, unknown>;
+  sentAt?: string;
+}) {
+  const { error } = await supabase.from("creator_email_logs").insert({
+    kind: entry.kind,
+    creator_id: entry.creatorId,
+    recipient_email: entry.recipientEmail,
+    subject: entry.subject,
+    period_key: entry.periodKey || null,
+    status: entry.status,
+    error: entry.error || "",
+    metadata: entry.metadata || {},
+    sent_at: entry.sentAt || null,
+  });
+  if (error) console.error("creator_email_logs:", error);
+}
+
+function summarizeEmailResults(
+  results: Array<{ ok: boolean; skipped?: boolean; error?: string; email: string }>,
+  extra: Record<string, unknown>,
+) {
+  const sent = results.filter((result) => result.ok && !result.skipped).length;
+  const skipped = results.filter((result) => result.skipped).length;
+  const failed = results.filter((result) => !result.ok).length;
+  return {
+    ok: failed === 0,
+    sent,
+    skipped,
+    failed,
+    results,
+    ...extra,
+  };
+}
+
+function weeklyReportPeriodKey(reference = new Date()) {
+  const end = new Date(
+    Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), reference.getUTCDate()),
+  );
+  const start = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);
+  return `${start.toISOString().slice(0, 10)}_${end.toISOString().slice(0, 10)}`;
+}
+
+function weeklyReportLabel(reference = new Date()) {
+  const end = new Date(
+    Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), reference.getUTCDate()),
+  );
+  const start = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const formatter = new Intl.DateTimeFormat("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+  return `${formatter.format(start)} au ${formatter.format(end)}`;
+}
+
+function cleanEmailBody(value: unknown, maximum: number) {
+  return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .trim()
+    .slice(0, maximum);
+}
+
+function htmlFromPlainText(value: string) {
+  return cleanEmailBody(value, 5000)
+    .split(/\n{2,}/)
+    .map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, "<br>")}</p>`)
+    .join("");
+}
+
+function formatEmailInteger(value: unknown) {
+  const number = Number(value || 0);
+  return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(
+    Number.isFinite(number) ? number : 0,
+  );
+}
+
+function formatEmailPercent(value: unknown) {
+  const number = Number(value || 0);
+  return `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(
+    (Number.isFinite(number) ? number : 0) * 100,
+  )} %`;
 }
 
 async function dashboard() {
@@ -1036,6 +1333,147 @@ async function youtubeRequest(resource: string, params: Record<string, string>) 
   return payload;
 }
 
+async function sendGmailBroadcast(creator: any, subject: string, message: string) {
+  const creatorName = creator.channelTitle || "createur";
+  const siteUrl = env(
+    "PUBLIC_SITE_URL",
+    "https://djcreeperytb.github.io/YouBoost/",
+  );
+  const text = [
+    `Bonjour ${creatorName},`,
+    "",
+    message,
+    "",
+    `Ouvrir YouBoost : ${siteUrl}`,
+    "",
+    "Vous recevez cet e-mail car vous avez un compte createur YouBoost.",
+    "",
+    "L'equipe YouBoost",
+  ].join("\n");
+  const html = `
+    <!doctype html>
+    <html lang="fr">
+    <body style="margin:0;padding:24px;background:#f5f6f8">
+    <div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#101828;background:white">
+      <div style="padding:20px;background:#07142e;color:white;border-radius:14px 14px 0 0">
+        <strong style="font-size:22px">YouBoost</strong>
+      </div>
+      <div style="padding:26px;border:1px solid #e6e8ec;border-top:0;border-radius:0 0 14px 14px;line-height:1.55">
+        <p>Bonjour ${escapeHtml(creatorName)},</p>
+        ${htmlFromPlainText(message)}
+        <p>
+          <a href="${escapeHtml(siteUrl)}" style="color:#d92d35;font-weight:700">
+            Ouvrir YouBoost
+          </a>
+        </p>
+        <p style="margin-top:28px;color:#667085">L'equipe YouBoost</p>
+        <p style="margin-top:24px;padding-top:16px;border-top:1px solid #e6e8ec;color:#98a2b3;font-size:12px;line-height:1.5">
+          Vous recevez cet e-mail car vous avez un compte createur YouBoost.
+        </p>
+      </div>
+    </div>
+    </body>
+    </html>`;
+
+  await sendGmailMessage(creator.email, subject, text, html);
+}
+
+async function sendGmailWeeklyReport(creator: any, report: any, subject: string) {
+  const creatorName = creator.channelTitle || "createur";
+  const summary = report.summary || {};
+  const estimatedPro = summary.estimatedPro || {};
+  const isPro = Boolean(summary.isPro || creator.isPro);
+  const totalClicks = formatEmailInteger(summary.totalClicks);
+  const uniqueVisitors = formatEmailInteger(summary.uniqueVisitors);
+  const videoCount = formatEmailInteger(summary.videoCount);
+  const averageClicks = formatEmailInteger(summary.averageClicksPerVideo);
+  const audienceShare = formatEmailPercent(summary.audienceShare);
+  const clickShare = formatEmailPercent(summary.clickShare);
+  const extraClicks = formatEmailInteger(estimatedPro.extraClicks);
+  const extraVisitors = formatEmailInteger(estimatedPro.extraUniqueVisitors);
+  const estimatedClicks = formatEmailInteger(estimatedPro.estimatedClicks);
+  const estimatedVisitors = formatEmailInteger(estimatedPro.estimatedUniqueVisitors);
+  const proText = isPro
+    ? "Ton abonnement Pro est actif : les boosts Pro sont deja pris en compte dans ces statistiques."
+    : `Avec YouBoost Pro, tu aurais pu viser environ ${estimatedClicks} clics et ${estimatedVisitors} visiteurs uniques, soit environ +${extraClicks} clics et +${extraVisitors} visiteurs uniques sur cette periode.`;
+  const topVideos = Array.isArray(report.videos) ? report.videos.slice(0, 3) : [];
+  const topVideoLines = topVideos.length
+    ? topVideos.map((video: any, index: number) =>
+        `${index + 1}. ${video.title || "Video YouTube"} - ${formatEmailInteger(video.clicks)} clics, ${formatEmailInteger(video.uniqueVisitors)} visiteurs uniques`,
+      )
+    : ["Aucune video n'a encore recu de clic sur cette periode."];
+  const text = [
+    `Bonjour ${creatorName},`,
+    "",
+    "Voici ton rapport YouBoost des 7 derniers jours.",
+    "",
+    `Clics sur tes videos : ${totalClicks}`,
+    `Visiteurs uniques rapportes : ${uniqueVisitors}`,
+    `Videos suivies : ${videoCount}`,
+    `Moyenne par video : ${averageClicks} clics`,
+    `Part de l'audience YouBoost : ${audienceShare}`,
+    `Part des clics video YouBoost : ${clickShare}`,
+    "",
+    proText,
+    "",
+    "Top videos :",
+    ...topVideoLines,
+    "",
+    "L'equipe YouBoost",
+  ].join("\n");
+  const topVideoHtml = topVideos.length
+    ? topVideos.map((video: any) => `
+        <tr>
+          <td style="padding:10px 0;border-top:1px solid #e6e8ec">
+            <strong>${escapeHtml(video.title || "Video YouTube")}</strong>
+            <div style="color:#667085;font-size:13px">
+              ${formatEmailInteger(video.clicks)} clics - ${formatEmailInteger(video.uniqueVisitors)} visiteurs uniques
+            </div>
+          </td>
+        </tr>`).join("")
+    : `<tr><td style="padding:10px 0;border-top:1px solid #e6e8ec;color:#667085">Aucune video n'a encore recu de clic sur cette periode.</td></tr>`;
+  const html = `
+    <!doctype html>
+    <html lang="fr">
+    <body style="margin:0;padding:24px;background:#f5f6f8">
+    <div style="font-family:Arial,sans-serif;max-width:660px;margin:auto;color:#101828;background:white">
+      <div style="padding:20px;background:#07142e;color:white;border-radius:14px 14px 0 0">
+        <strong style="font-size:22px">YouBoost</strong>
+      </div>
+      <div style="padding:26px;border:1px solid #e6e8ec;border-top:0;border-radius:0 0 14px 14px">
+        <p>Bonjour ${escapeHtml(creatorName)},</p>
+        <p>Voici ton rapport YouBoost des 7 derniers jours.</p>
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:20px 0;border-collapse:collapse">
+          <tr>
+            <td style="width:50%;padding:12px;border:1px solid #e6e8ec"><strong>${totalClicks}</strong><br><span style="color:#667085">clics video</span></td>
+            <td style="width:50%;padding:12px;border:1px solid #e6e8ec"><strong>${uniqueVisitors}</strong><br><span style="color:#667085">visiteurs uniques</span></td>
+          </tr>
+          <tr>
+            <td style="width:50%;padding:12px;border:1px solid #e6e8ec"><strong>${videoCount}</strong><br><span style="color:#667085">videos suivies</span></td>
+            <td style="width:50%;padding:12px;border:1px solid #e6e8ec"><strong>${averageClicks}</strong><br><span style="color:#667085">clics moyens/video</span></td>
+          </tr>
+          <tr>
+            <td style="width:50%;padding:12px;border:1px solid #e6e8ec"><strong>${audienceShare}</strong><br><span style="color:#667085">part d'audience</span></td>
+            <td style="width:50%;padding:12px;border:1px solid #e6e8ec"><strong>${clickShare}</strong><br><span style="color:#667085">part des clics video</span></td>
+          </tr>
+        </table>
+        <div style="margin:22px 0;padding:16px;border-radius:12px;background:#fff5f5;border:1px solid #ffd8d8">
+          <strong>Estimation YouBoost Pro</strong>
+          <p style="margin-bottom:0">${escapeHtml(proText)}</p>
+        </div>
+        <h2 style="font-size:18px;margin:24px 0 8px">Top videos</h2>
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse">
+          ${topVideoHtml}
+        </table>
+        <p style="margin-top:28px;color:#667085">L'equipe YouBoost</p>
+      </div>
+    </div>
+    </body>
+    </html>`;
+
+  await sendGmailMessage(creator.email, subject, text, html);
+}
+
 async function sendGmailDecision(creator: any, submission: any) {
   const accepted = submission.status === "accepted";
   const decision = accepted ? "acceptée" : "refusée";
@@ -1382,6 +1820,19 @@ async function createSignedToken(
   );
   const signature = await hmacBase64Url(payload, secret);
   return `${payload}.${signature}`;
+}
+
+function requireCron(request: Request) {
+  const secret = env("WEEKLY_REPORT_SECRET") || env("CRON_SECRET") || env("ADMIN_TOKEN_SECRET");
+  if (!secret) {
+    throw new HttpError(503, "Le secret du cron hebdomadaire n'est pas configure.");
+  }
+  const authorization = request.headers.get("authorization") || "";
+  const bearer = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+  const token = request.headers.get("x-cron-secret") || bearer;
+  if (!token || !safeEqual(token, secret)) {
+    throw new HttpError(401, "Secret du cron invalide.");
+  }
 }
 
 async function requireAdmin(request: Request) {

@@ -107,6 +107,9 @@
         <button class="button button--ghost upgrade-button" id="upgradeButton" type="button">
           Mettre à niveau
         </button>
+        <button class="button button--ghost domain-fund-top-button" data-domain-fund-button type="button">
+          Cagnotte
+        </button>
         <button class="button button--primary add-video-button" id="openSubmit" type="button">
           <svg><use href="#icon-plus"></use></svg>
           <span>Ajouter une vidéo</span>
@@ -153,6 +156,17 @@
           <strong>Votre fil s'améliore</strong>
           <p>Regardez et ajoutez des vidéos aux favoris pour personnaliser vos recommandations.</p>
           <button id="resetProfile" type="button">Réinitialiser mon profil</button>
+        </div>
+
+        <div class="sidebar__fund">
+          <span>Cagnote</span>
+          <strong>Un vrai nom de domaine</strong>
+          <p>Aidez YouBoost à quitter l'adresse GitHub Pages avec un domaine propre.</p>
+          <div class="fund-progress" aria-hidden="true">
+            <i data-domain-fund-progress></i>
+          </div>
+          <small data-domain-fund-label>0 € collectés sur 25 €</small>
+          <button data-domain-fund-button type="button">Participer</button>
         </div>
 
         <p class="sidebar__footer">YouBoost <span id="currentYear"></span><br />Propulsé par les petits créateurs.</p>
@@ -231,6 +245,32 @@
             YouBoost privilégie la découverte, la fraîcheur et vos goûts. Le nombre d'abonnés
             n'achète pas une place dans votre fil.
           </p>
+        </section>
+
+        <section class="domain-fund-section" aria-labelledby="domainFundTitle">
+          <div>
+            <p class="section-kicker">Cagnote communautaire</p>
+            <h2 id="domainFundTitle">Un vrai nom de domaine pour YouBoost</h2>
+            <p>
+              L'objectif est de financer le premier domaine officiel de YouBoost et de remplacer
+              l'adresse GitHub Pages par une adresse plus simple à partager.
+            </p>
+          </div>
+          <div class="domain-fund-card">
+            <div class="domain-fund-card__topline">
+              <span>Objectif domaine</span>
+              <strong data-domain-fund-percent>0%</strong>
+            </div>
+            <div class="domain-fund-card__amount" data-domain-fund-label>
+              0 € collectés sur 25 €
+            </div>
+            <div class="fund-progress fund-progress--large" aria-hidden="true">
+              <i data-domain-fund-progress></i>
+            </div>
+            <button class="button button--primary" data-domain-fund-button type="button">
+              Participer à la cagnote
+            </button>
+          </div>
         </section>
       </main>
     </div>
@@ -388,6 +428,9 @@
             <small id="accountPlanDates"></small>
           </div>
           <div class="account-actions">
+            <button class="button button--primary" id="accountStudioButton" type="button">
+              Ouvrir YouBoost Studio
+            </button>
             <button class="button button--primary" id="accountUpgradeButton" type="button">
               Mettre à niveau
             </button>
@@ -396,6 +439,86 @@
             </button>
           </div>
         </div>
+      </div>
+    </dialog>
+
+    <dialog class="submit-dialog studio-dialog" id="studioDialog">
+      <div class="dialog-panel submit-form studio-panel">
+        <button class="dialog-close icon-button" data-close-dialog type="button" aria-label="Fermer">
+          <svg><use href="#icon-x"></use></svg>
+        </button>
+        <span class="eyebrow"><span></span> YouBoost Studio</span>
+        <h2>Statistiques créateur</h2>
+        <p class="submit-form__intro" id="studioSubtitle">
+          Suivez les clics, l'audience apportée et ce que le bonus Pro aurait pu améliorer.
+        </p>
+
+        <div class="studio-toolbar" aria-label="Période des statistiques Studio">
+          <button data-studio-range="24h" type="button">24 h</button>
+          <button class="is-active" data-studio-range="7d" type="button">7 j</button>
+          <button data-studio-range="28d" type="button">28 j</button>
+          <button data-studio-range="1m" type="button">1 mois</button>
+          <button data-studio-range="all" type="button">Depuis le début</button>
+        </div>
+        <p class="studio-period" id="studioRangeLabel"></p>
+        <p class="submit-form__status" id="studioStatus" role="status" aria-live="polite"></p>
+
+        <div class="studio-summary">
+          <article>
+            <span>Clics vidéo</span>
+            <strong id="studioClicks">0</strong>
+            <small>Ouvertures de vos vidéos</small>
+          </article>
+          <article>
+            <span>Audience apportée</span>
+            <strong id="studioUniqueVisitors">0</strong>
+            <small>Visiteurs uniques touchés</small>
+          </article>
+          <article>
+            <span>Part d'audience</span>
+            <strong id="studioAudienceShare">0%</strong>
+            <small>Sur l'audience YouBoost</small>
+          </article>
+          <article>
+            <span>Part des clics</span>
+            <strong id="studioClickShare">0%</strong>
+            <small>Dans les clics vidéo</small>
+          </article>
+        </div>
+
+        <div class="studio-pro-card">
+          <div>
+            <span>Simulation Pro</span>
+            <strong id="studioProLift">+0%</strong>
+            <p id="studioProText">Activez Pro pour obtenir une priorité renforcée dans les recommandations.</p>
+          </div>
+          <button class="button button--primary" id="studioUpgradeButton" type="button">
+            Passer Pro
+          </button>
+        </div>
+
+        <div class="studio-secondary">
+          <article>
+            <span>Vidéos publiées</span>
+            <strong id="studioVideoCount">0</strong>
+          </article>
+          <article>
+            <span>Moyenne par vidéo</span>
+            <strong id="studioAverageClicks">0</strong>
+          </article>
+          <article>
+            <span>Clics estimés avec Pro</span>
+            <strong id="studioEstimatedClicks">0</strong>
+          </article>
+          <article>
+            <span>Audience estimée avec Pro</span>
+            <strong id="studioEstimatedVisitors">0</strong>
+          </article>
+        </div>
+
+        <div class="studio-chart" id="studioChart"></div>
+
+        <div class="studio-video-list" id="studioVideoList"></div>
       </div>
     </dialog>
 
